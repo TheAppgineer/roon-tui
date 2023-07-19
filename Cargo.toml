@@ -1,0 +1,19 @@
+[package]
+name = "plop-tui"
+version = "0.1.1"
+authors = ["igor <ilaborie@gmail.com>"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ilaborie/plop-tui"
+
+[dependencies]
+log = "0.4"
+
+# tui-logger = "0.6"
+tui-logger = { git = "https://github.com/gin66/tui-logger", rev = "3a3568e2464dddc2205e071234135998342d7f1d" }
+
+tui = { version = "0.15", features = ["crossterm"], default-features = false }
+crossterm = "0.19"
+tokio = { version = "1", features = ["full"] }
+
+eyre = "0.6"
