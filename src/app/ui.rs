@@ -1,9 +1,9 @@
-use tui::backend::Backend;
-use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use tui::style::{Color, Style};
-use tui::text::{Span, Spans};
-use tui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table};
-use tui::Frame;
+use ratatui::backend::Backend;
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Style};
+use ratatui::text::{Span, Line};
+use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table};
+use ratatui::Frame;
 
 use super::actions::Actions;
 use super::state::AppState;
@@ -78,10 +78,10 @@ fn draw_body<'a>(loading: bool, state: &AppState) -> Paragraph<'a> {
         String::default()
     };
     Paragraph::new(vec![
-        Spans::from(Span::raw(initialized_text)),
-        Spans::from(Span::raw(loading_text)),
-        Spans::from(Span::raw(sleep_text)),
-        Spans::from(Span::raw(tick_text)),
+        Line::from(Span::raw(initialized_text)),
+        Line::from(Span::raw(loading_text)),
+        Line::from(Span::raw(sleep_text)),
+        Line::from(Span::raw(tick_text)),
     ])
     .style(Style::default().fg(Color::LightCyan))
     .alignment(Alignment::Left)

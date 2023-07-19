@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use eyre::Result;
-use plop_tui::app::App;
-use plop_tui::io::handler::IoAsyncHandler;
-use plop_tui::io::IoEvent;
-use plop_tui::start_ui;
+use roon_tui::app::App;
+use roon_tui::io::handler::IoAsyncHandler;
+use roon_tui::io::IoEvent;
+use roon_tui::start_ui;
 
 #[tokio::main]
 async fn main() -> Result<()> {

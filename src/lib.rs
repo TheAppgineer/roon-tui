@@ -7,8 +7,8 @@ use eyre::Result;
 use inputs::events::Events;
 use inputs::InputEvent;
 use io::IoEvent;
-use tui::backend::CrosstermBackend;
-use tui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 
 use crate::app::ui;
 
