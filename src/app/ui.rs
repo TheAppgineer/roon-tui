@@ -23,7 +23,7 @@ where
         .split(size);
 
     // Title
-    let title = draw_title();
+    let title = draw_title(&app.browse_title);
     rect.render_widget(title, chunks[0]);
 
     // Body & Help
@@ -39,8 +39,8 @@ where
     rect.render_widget(help, body_chunks[1]);
 }
 
-fn draw_title<'a>() -> Paragraph<'a> {
-    Paragraph::new("Plop with TUI")
+fn draw_title<'a>(title:&'a str) -> Paragraph<'a> {
+    Paragraph::new(title)
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)
         .block(

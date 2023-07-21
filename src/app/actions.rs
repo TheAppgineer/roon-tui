@@ -2,19 +2,18 @@ use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::slice::Iter;
 
-use crate::inputs::key::Key;
+use crate::io::key::Key;
 
 /// We define all available action
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Action {
     Quit,
-    Sleep,
 }
 
 impl Action {
     /// All available actions
     pub fn iterator() -> Iter<'static, Action> {
-        static ACTIONS: [Action; 2] = [Action::Quit, Action::Sleep];
+        static ACTIONS: [Action; 1] = [Action::Quit];
         ACTIONS.iter()
     }
 
@@ -22,7 +21,6 @@ impl Action {
     pub fn keys(&self) -> &[Key] {
         match self {
             Action::Quit => &[Key::Ctrl('c'), Key::Char('q')],
-            Action::Sleep => &[Key::Char('s')],
         }
     }
 }
@@ -32,7 +30,6 @@ impl Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let str = match self {
             Action::Quit => "Quit",
-            Action::Sleep => "Sleep",
         };
         write!(f, "{}", str)
     }

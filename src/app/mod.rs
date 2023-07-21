@@ -1,10 +1,10 @@
-use log::{debug, error, warn};
+use log::{debug, warn};
+use tokio::sync::mpsc;
 
 use self::actions::Actions;
 use self::state::AppState;
 use crate::app::actions::Action;
-use crate::inputs::key::Key;
-use crate::io::IoEvent;
+use crate::io::{IoEvent, key::Key};
 
 pub mod actions;
 pub mod state;
@@ -18,26 +18,25 @@ pub enum AppReturn {
 
 /// The main application, containing the state
 pub struct App {
-    /// We could dispatch an IO event
-    io_tx: tokio::sync::mpsc::Sender<IoEvent>,
-    /// Contextual actions
+    io_rx: mpsc::Receiver<IoEvent>,
     actions: Actions,
-    /// State
     is_loading: bool,
     state: AppState,
+    browse_title: String,
 }
 
 impl App {
-    pub fn new(io_tx: tokio::sync::mpsc::Sender<IoEvent>) -> Self {
+    pub fn new(io_rx: mpsc::Receiver<IoEvent>) -> Self {
         let actions = vec![Action::Quit].into();
         let is_loading = false;
         let state = AppState::default();
 
         Self {
-            io_tx,
+            io_rx,
             actions,
             is_loading,
             state,
+            browse_title: "Browse".to_owned(),
         }
     }
 
@@ -47,13 +46,6 @@ impl App {
             debug!("Run action [{:?}]", action);
             match action {
                 Action::Quit => AppReturn::Exit,
-                Action::Sleep => {
-                    if let Some(duration) = self.state.duration().cloned() {
-                        // Sleep is an I/O action, we dispatch on the IO channel that's run on another thread
-                        self.dispatch(IoEvent::Sleep(duration)).await
-                    }
-                    AppReturn::Continue
-                }
             }
         } else {
             warn!("No action accociated to {}", key);
@@ -68,14 +60,24 @@ impl App {
         AppReturn::Continue
     }
 
-    /// Send a network event to the IO thread
-    pub async fn dispatch(&mut self, action: IoEvent) {
+    pub async fn update_on_event(&mut self) -> AppReturn {
         // `is_loading` will be set to false again after the async action has finished in io/handler.rs
         self.is_loading = true;
-        if let Err(e) = self.io_tx.send(action).await {
-            self.is_loading = false;
-            error!("Error from dispatch {}", e);
-        };
+
+        if let Some(io_event) = self.io_rx.recv().await {
+            match io_event {
+                IoEvent::Initialize => self.initialized(),
+                IoEvent::Input(key) => self.do_action(key).await,
+                IoEvent::Tick => self.update_on_tick().await,
+                IoEvent::BrowseTitle(browse_title) => {
+                    self.browse_title = browse_title;
+
+                    AppReturn::Continue
+                }
+            }
+        } else {
+            AppReturn::Continue
+        }
     }
 
     pub fn actions(&self) -> &Actions {
@@ -89,10 +91,12 @@ impl App {
         self.is_loading
     }
 
-    pub fn initialized(&mut self) {
+    fn initialized(&mut self) -> AppReturn {
         // Update contextual actions
-        self.actions = vec![Action::Quit, Action::Sleep].into();
-        self.state = AppState::initialized()
+        self.actions = vec![Action::Quit].into();
+        self.state = AppState::initialized();
+
+        AppReturn::Continue
     }
 
     pub fn loaded(&mut self) {

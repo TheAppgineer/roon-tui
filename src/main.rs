@@ -1,28 +1,23 @@
-use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::mpsc;
 
 use eyre::Result;
 use roon_tui::app::App;
-use roon_tui::io::handler::IoAsyncHandler;
-use roon_tui::io::IoEvent;
+use roon_tui::io::{events::Events, roon};
 use roon_tui::start_ui;
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> Result<()> {
-    let (sync_io_tx, mut sync_io_rx) = tokio::sync::mpsc::channel::<IoEvent>(100);
+    let tick_rate = Duration::from_millis(200);
+    let (io_tx, io_rx) = mpsc::channel(10);
+    let mut events = Events::new(io_tx.clone(), tick_rate);
+    let mut app = App::new(io_rx);
 
-    // We need to share the App between thread
-    let app = Arc::new(tokio::sync::Mutex::new(App::new(sync_io_tx.clone())));
-    let app_ui = Arc::clone(&app);
+    roon::start(io_tx).await;
 
-    // Handle IO in a specifc thread
-    tokio::spawn(async move {
-        let mut handler = IoAsyncHandler::new(app);
-        while let Some(io_event) = sync_io_rx.recv().await {
-            handler.handle_io_event(io_event).await;
-        }
-    });
+    start_ui(&mut app).await?;
 
-    start_ui(&app_ui).await?;
+    events.close();
 
     Ok(())
 }

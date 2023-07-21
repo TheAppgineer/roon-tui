@@ -1,9 +1,14 @@
-use std::time::Duration;
+use key::Key;
 
-pub mod handler;
+pub mod events;
+pub mod key;
+pub mod roon;
+
 // For this dummy application we only need two IO event
 #[derive(Debug, Clone)]
 pub enum IoEvent {
-    Initialize,      // Launch to initialize the application
-    Sleep(Duration), // Just take a little break
+    Initialize,
+    Input(Key),
+    Tick,
+    BrowseTitle(String),
 }
