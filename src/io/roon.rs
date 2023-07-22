@@ -1,4 +1,4 @@
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, select};
 
 use rust_roon_api::{
     info,
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use super::IoEvent;
 
-pub async fn start(io_tx: mpsc::Sender<IoEvent>) {
+pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
     let mut info = info!("com.theappgineer", "Roon TUI");
 
     info.set_log_level(LogLevel::None);
@@ -31,28 +31,66 @@ pub async fn start(io_tx: mpsc::Sender<IoEvent>) {
 
     tokio::spawn(async move {
         let mut browse = None;
+        let mut opts: BrowseOpts = BrowseOpts::default();
 
         loop {
-            if let Some((core_event, msg)) = core_rx.recv().await {
-                match core_event {
-                    CoreEvent::Found(mut paired_core) => {
-                        browse = paired_core.get_browse().cloned();
-
-                        if let Some(browse) = browse.as_ref() {
-                            let opts = BrowseOpts {
-                                pop_all: true,
-                                ..Default::default()
-                            };
-
-                            browse.browse(&opts).await;
+            select! {
+                Some((core_event, msg)) = core_rx.recv() => {
+                    match core_event {
+                        CoreEvent::Found(mut paired_core) => {
+                            browse = paired_core.get_browse().cloned();
+    
+                            if let Some(browse) = browse.as_ref() {
+                                let opts = BrowseOpts {
+                                    pop_all: true,
+                                    ..Default::default()
+                                };
+    
+                                browse.browse(&opts).await;
+    
+                                let io_event = IoEvent::CoreName(Some(paired_core.display_name));
+                                to_app.send(io_event).await.unwrap();
+                            }
                         }
+                        CoreEvent::Lost(_) => to_app.send(IoEvent::CoreName(None)).await.unwrap(),
+                        _ => (),
                     }
-                    CoreEvent::Lost(_) => (),
-                    _ => (),
+    
+                    if let Some((_, parsed)) = msg {
+                        handle_parsed_response(browse.as_ref(), &to_app, parsed).await;
+                    }
                 }
+                Some(event) = from_app.recv() => {
+                    // Only one of item_key, pop_all, pop_levels, and refresh_list may be populated
+                    opts.item_key = None;
+                    opts.pop_all = false;
+                    opts.pop_levels = None;
+                    opts.refresh_list = false;
 
-                if let Some((_, parsed)) = msg {
-                    handle_parsed_response(browse.as_ref(), &io_tx, parsed).await;
+                    match event {
+                        IoEvent::BrowseSelected(item_key) => {
+                            if let Some(browse) = browse.as_ref() {
+                                opts.item_key = item_key;
+
+                                browse.browse(&opts).await;
+                            }
+                        }
+                        IoEvent::BrowseBack => {
+                            if let Some(browse) = browse.as_ref() {
+                                opts.pop_levels = Some(1);
+
+                                browse.browse(&opts).await;
+                            }
+                        }
+                        IoEvent::BrowseHome => {
+                            if let Some(browse) = browse.as_ref() {
+                                opts.pop_all = true;
+
+                                browse.browse(&opts).await;
+                            }
+                        }
+                        _ => (),
+                    }
                 }
             }
         }
@@ -74,7 +112,7 @@ async fn handle_parsed_response(
 
                             let offset = list.display_offset.unwrap_or_default();
                             let opts = LoadOpts {
-                                count: Some(10),
+                                count: Some(100),
                                 offset,
                                 set_display_offset: offset,
                                 ..Default::default()
@@ -89,7 +127,7 @@ async fn handle_parsed_response(
                 }
             }
             Parsed::LoadResult(result) => {
-                let io_event = IoEvent::BrowseItems(result.items);
+                let io_event = IoEvent::BrowseList(result.items);
                 io_tx.send(io_event).await.unwrap();
             }
             _ => (),

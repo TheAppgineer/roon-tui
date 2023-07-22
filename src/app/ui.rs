@@ -31,11 +31,16 @@ where
     let size = frame.size();
 
     // Surrounding block
+    let title = if let Some(name) = app.core_name.as_ref() {
+        format!("[ Roon TUI - {} ]", name)
+    } else {
+        "[ Roon TUI - No core found]".to_owned()
+    };
     let color = if app.get_selected_view().is_none() {ROON_BRAND_COLOR} else {Color::Reset};
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(color))
-        .title(Span::styled("[ Roon TUI ]", Style::default().fg(color)))
+        .title(Span::styled(title, Style::default().fg(color)))
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Plain);
     frame.render_widget(block, size);
@@ -64,6 +69,8 @@ where
             ];
 
             if let Some(subtitle) = subtitle {
+                let subtitle = format!("  ({})", subtitle);
+
                 lines.push(Line::from(Span::styled(subtitle, Style::default())));
             }
             ListItem::new(lines).style(Style::default())

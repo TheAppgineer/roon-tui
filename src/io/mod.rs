@@ -9,6 +9,11 @@ pub mod roon;
 pub enum IoEvent {
     Input(KeyEvent),
     Tick,
+    CoreName(Option<String>),
     BrowseTitle(String),
-    BrowseItems(Vec<browse::Item>)
+    BrowseList(Vec<browse::Item>),
+    BrowseAppend(Vec<browse::Item>),
+    BrowseSelected(Option<String>),
+    BrowseBack,
+    BrowseHome,
 }
