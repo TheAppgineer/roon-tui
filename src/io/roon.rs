@@ -2,7 +2,7 @@ use tokio::sync::mpsc;
 
 use rust_roon_api::{
     info,
-    browse::{Browse, BrowseOpts, Action},
+    browse::{Action, Browse, BrowseOpts, LoadOpts},
     CoreEvent,
     Info,
     LogLevel,
@@ -30,15 +30,13 @@ pub async fn start(io_tx: mpsc::Sender<IoEvent>) {
     let (_, mut core_rx) = roon.start_discovery(provided, Some(services)).await.unwrap();
 
     tokio::spawn(async move {
-        let mut browse: Option<Browse> = None;
+        let mut browse = None;
 
         loop {
-            if let Some((core, msg)) = core_rx.recv().await {
-                match core {
-                    CoreEvent::Found(mut core) => {
-                        let _ = io_tx.send(super::IoEvent::Initialize).await;
-
-                        browse = core.get_browse().cloned();
+            if let Some((core_event, msg)) = core_rx.recv().await {
+                match core_event {
+                    CoreEvent::Found(mut paired_core) => {
+                        browse = paired_core.get_browse().cloned();
 
                         if let Some(browse) = browse.as_ref() {
                             let opts = BrowseOpts {
@@ -54,26 +52,47 @@ pub async fn start(io_tx: mpsc::Sender<IoEvent>) {
                 }
 
                 if let Some((_, parsed)) = msg {
-                    if let Some(_) = browse.as_ref() {
-                        match parsed {
-                            Parsed::BrowseResult(result) => {
-                                match result.action {
-                                    Action::List => {
-                                        if let Some(list) = result.list {
-                                            let io_event = super::IoEvent::BrowseTitle(list.title);
-                                            let _ = io_tx.send(io_event).await;
-                                        }
-                                    }
-                                    Action::Message => {
-                                    }
-                                    _ => (),
-                                }
-                            }
-                            _ => (),
-                        }
-                    }
+                    handle_parsed_response(browse.as_ref(), &io_tx, parsed).await;
                 }
             }
         }
     });
+}
+
+async fn handle_parsed_response(
+    browse: Option<&Browse>,
+    io_tx: &mpsc::Sender<IoEvent>,
+    parsed: Parsed
+) {
+    if let Some(browse) = browse {
+        match parsed {
+            Parsed::BrowseResult(result) => {
+                match result.action {
+                    Action::List => {
+                        if let Some(list) = result.list {
+                            io_tx.send(IoEvent::BrowseTitle(list.title)).await.unwrap();
+
+                            let offset = list.display_offset.unwrap_or_default();
+                            let opts = LoadOpts {
+                                count: Some(10),
+                                offset,
+                                set_display_offset: offset,
+                                ..Default::default()
+                            };
+
+                            browse.load(&opts).await;
+                        }
+                    }
+                    Action::Message => {
+                    }
+                    _ => (),
+                }
+            }
+            Parsed::LoadResult(result) => {
+                let io_event = IoEvent::BrowseItems(result.items);
+                io_tx.send(io_event).await.unwrap();
+            }
+            _ => (),
+        }
+    }
 }

@@ -1,14 +1,14 @@
-use key::Key;
+use crossterm::event::KeyEvent;
+use rust_roon_api::browse;
 
 pub mod events;
-pub mod key;
 pub mod roon;
 
 // For this dummy application we only need two IO event
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum IoEvent {
-    Initialize,
-    Input(Key),
+    Input(KeyEvent),
     Tick,
     BrowseTitle(String),
+    BrowseItems(Vec<browse::Item>)
 }

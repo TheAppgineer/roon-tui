@@ -4,7 +4,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use log::error;
 
-use super::key::Key;
 use crate::io::IoEvent;
 
 /// A small event handler that wrap crossterm input and tick event. Each event
@@ -25,7 +24,6 @@ impl Events {
                 // poll for tick rate duration, if no event, sent tick event.
                 if crossterm::event::poll(tick_rate).unwrap() {
                     if let crossterm::event::Event::Key(key) = crossterm::event::read().unwrap() {
-                        let key = Key::from(key);
                         if let Err(err) = io_tx.send(IoEvent::Input(key)).await {
                             error!("Oops!, {}", err);
                         }

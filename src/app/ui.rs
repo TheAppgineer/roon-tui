@@ -1,128 +1,151 @@
-use ratatui::backend::Backend;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
-use ratatui::text::{Span, Line};
-use ratatui::widgets::{Block, BorderType, Borders, Cell, Paragraph, Row, Table};
-use ratatui::Frame;
+use ratatui::{
+    backend::Backend,
+    Frame,
+    layout::{Alignment, Constraint, Direction, Layout},
+    style::{Color, Modifier, Style},
+    text::{Span, Line},
+    widgets::{block::{self, Block}, BorderType, Borders, List, ListItem, Padding, Paragraph},
+};
 
-use super::actions::Actions;
-use super::state::AppState;
-use crate::app::App;
+use crate::app::{App, View};
 
-pub fn draw<B>(rect: &mut Frame<B>, app: &App)
+const ROON_BRAND_COLOR: Color = Color::Rgb(0x75, 0x75, 0xf3);
+
+const PLAY: &str = " \u{23f5} ";
+const _PAUSE: char = '\u{23f8}';
+const _STOP: char = '\u{23f9}';
+const _RELOAD: char = '\u{27f3}';
+const _SHUFFLE: char = '\u{1f500}';
+const _REPEAT: char = '\u{1f501}';
+const _REPEAT_ONCE: char = '\u{1f502}';
+const _SPEAKER_ONE_WAVE: char = '\u{1f509}';
+const _SPEAKER_THREE_WAVE: char = '\u{1f50a}';
+
+pub fn draw<B>(frame: &mut Frame<B>, app: &mut App)
 where
     B: Backend,
 {
-    let size = rect.size();
-    check_size(&size);
+    // Wrapping block for a group
+    // Just draw the block and the group on the same area and build the group
+    // with at least a margin of 1
+    let size = frame.size();
 
-    // Vertical layout
+    // Surrounding block
+    let color = if app.get_selected_view().is_none() {ROON_BRAND_COLOR} else {Color::Reset};
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(color))
+        .title(Span::styled("[ Roon TUI ]", Style::default().fg(color)))
+        .title_alignment(Alignment::Center)
+        .border_type(BorderType::Plain);
+    frame.render_widget(block, size);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(10)].as_ref())
-        .split(size);
+        .horizontal_margin(2)
+        .vertical_margin(1)
+        .constraints([Constraint::Percentage(75), Constraint::Percentage(25)].as_ref())
+        .split(frame.size());
 
-    // Title
-    let title = draw_title(&app.browse_title);
-    rect.render_widget(title, chunks[0]);
-
-    // Body & Help
-    let body_chunks = Layout::default()
+    // Top two inner blocks
+    let top_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(20), Constraint::Length(32)].as_ref())
-        .split(chunks[1]);
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
+        .split(chunks[0]);
 
-    let body = draw_body(app.is_loading(), app.state());
-    rect.render_widget(body, body_chunks[0]);
+    // Iterate through all elements in the `items` app and append some debug text to it.
+    if let Some(browse_items) = &app.browse.items {
+        let items: Vec<ListItem> = browse_items
+        .iter()
+        .map(|item| {
+            let subtitle = item.subtitle.as_ref().filter(|s| !s.is_empty());
+            let mut lines = vec![
+                Line::from(Span::styled(&item.title, Style::default().add_modifier(Modifier::BOLD)))
+            ];
 
-    let help = draw_help(app.actions());
-    rect.render_widget(help, body_chunks[1]);
-}
+            if let Some(subtitle) = subtitle {
+                lines.push(Line::from(Span::styled(subtitle, Style::default())));
+            }
+            ListItem::new(lines).style(Style::default())
+        })
+        .collect();
 
-fn draw_title<'a>(title:&'a str) -> Paragraph<'a> {
-    Paragraph::new(title)
-        .style(Style::default().fg(Color::LightCyan))
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .style(Style::default().fg(Color::White))
-                .border_type(BorderType::Plain),
+        // Create a List from all list items and highlight the currently selected one
+        let items = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("List")
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(ROON_BRAND_COLOR)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(PLAY);
+
+        // We can now render the item list
+        frame.render_stateful_widget(items, top_chunks[0], &mut app.browse.state);
+    }
+
+    // [ Browse ] view
+    let browse_title = format!("[ {} ]", app.browse.title.as_deref().unwrap_or("Browse"));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(get_view_style(app, View::Browse))
+        .title(
+            Span::styled(
+                browse_title, 
+                get_view_style(app, View::Browse)
+            )
+        );
+    frame.render_widget(block, top_chunks[0]);
+
+    // [ Queue ] view
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(get_view_style(app, View::Queue))
+        .title(
+            Span::styled(
+                "[ Queue ]",
+                get_view_style(app, View::Queue),
+            )
         )
+        .title_alignment(Alignment::Right);
+    frame.render_widget(block, top_chunks[1]);
+
+    // [ Now Playing] view
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(get_view_style(app, View::NowPlaying))
+        .title(
+            Span::styled(
+                "[ Now Playing ]",
+                get_view_style(app, View::NowPlaying),
+            )
+        )
+        .title_position(block::Position::Bottom)
+        .padding(Padding {
+            left: 2,
+            right: 2,
+            top: 0,
+            bottom: 0,
+        });
+
+    let text = Paragraph::new("Track\nArtist\nAlbum")
+        .style(Style::default().add_modifier(Modifier::DIM))
+        .block(block);
+    frame.render_widget(text, chunks[1]);
 }
 
-fn check_size(rect: &Rect) {
-    if rect.width < 52 {
-        panic!("Require width >= 52, (got {})", rect.width);
-    }
-    if rect.height < 28 {
-        panic!("Require height >= 28, (got {})", rect.height);
-    }
-}
+fn get_view_style(app: &App, view: View) -> Style {
+    let mut style = Style::default();
 
-fn draw_body<'a>(loading: bool, state: &AppState) -> Paragraph<'a> {
-    let initialized_text = if state.is_initialized() {
-        "Initialized"
-    } else {
-        "Not Initialized !"
-    };
-    let loading_text = if loading { "Loading..." } else { "" };
-    let sleep_text = if let Some(sleeps) = state.count_sleep() {
-        format!("Sleep count: {}", sleeps)
-    } else {
-        String::default()
-    };
-    let tick_text = if let Some(ticks) = state.count_tick() {
-        format!("Tick count: {}", ticks)
-    } else {
-        String::default()
-    };
-    Paragraph::new(vec![
-        Line::from(Span::raw(initialized_text)),
-        Line::from(Span::raw(loading_text)),
-        Line::from(Span::raw(sleep_text)),
-        Line::from(Span::raw(tick_text)),
-    ])
-    .style(Style::default().fg(Color::LightCyan))
-    .alignment(Alignment::Left)
-    .block(
-        Block::default()
-            // .title("Body")
-            .borders(Borders::ALL)
-            .style(Style::default().fg(Color::White))
-            .border_type(BorderType::Plain),
-    )
-}
-
-fn draw_help(actions: &Actions) -> Table {
-    let key_style = Style::default().fg(Color::LightCyan);
-    let help_style = Style::default().fg(Color::Gray);
-
-    let mut rows = vec![];
-    for action in actions.actions().iter() {
-        let mut first = true;
-        for key in action.keys() {
-            let help = if first {
-                first = false;
-                action.to_string()
-            } else {
-                String::from("")
-            };
-            let row = Row::new(vec![
-                Cell::from(Span::styled(key.to_string(), key_style)),
-                Cell::from(Span::styled(help, help_style)),
-            ]);
-            rows.push(row);
+    if let Some(selected_view) = app.get_selected_view() {
+        if *selected_view == view {
+            style = style.fg(ROON_BRAND_COLOR);
         }
     }
 
-    Table::new(rows)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Plain)
-                .title("Help"),
-        )
-        .widths(&[Constraint::Length(11), Constraint::Min(20)])
-        .column_spacing(1)
+    style
 }

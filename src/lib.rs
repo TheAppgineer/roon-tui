@@ -19,7 +19,7 @@ pub async fn start_ui(app: &mut App) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     loop {
-        terminal.draw(|rect| ui::draw(rect, &app))?;
+        terminal.draw(|rect| ui::draw(rect, app))?;
 
         let result = app.update_on_event().await;
 
