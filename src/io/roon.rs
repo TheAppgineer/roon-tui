@@ -82,6 +82,13 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                                 browse.browse(&opts).await;
                             }
                         }
+                        IoEvent::BrowseRefresh => {
+                            if let Some(browse) = browse.as_ref() {
+                                opts.refresh_list = true;
+
+                                browse.browse(&opts).await;
+                            }
+                        }
                         IoEvent::BrowseHome => {
                             if let Some(browse) = browse.as_ref() {
                                 opts.pop_all = true;
@@ -99,7 +106,7 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
 
 async fn handle_parsed_response(
     browse: Option<&Browse>,
-    io_tx: &mpsc::Sender<IoEvent>,
+    to_app: &mpsc::Sender<IoEvent>,
     parsed: Parsed
 ) {
     if let Some(browse) = browse {
@@ -108,7 +115,7 @@ async fn handle_parsed_response(
                 match result.action {
                     Action::List => {
                         if let Some(list) = result.list {
-                            io_tx.send(IoEvent::BrowseTitle(list.title)).await.unwrap();
+                            to_app.send(IoEvent::BrowseTitle(list.title)).await.unwrap();
 
                             let offset = list.display_offset.unwrap_or_default();
                             let opts = LoadOpts {
@@ -127,8 +134,18 @@ async fn handle_parsed_response(
                 }
             }
             Parsed::LoadResult(result) => {
-                let io_event = IoEvent::BrowseList(result.items);
-                io_tx.send(io_event).await.unwrap();
+                let new_offset = result.offset + result.items.len();
+
+                if new_offset < result.list.count {
+                    let opts = BrowseOpts {
+                        set_display_offset: Some(new_offset),
+                        ..Default::default()
+                    };
+
+                    browse.browse(&opts).await;
+                }
+
+                to_app.send(IoEvent::BrowseList(result.offset, result.items)).await.unwrap();
             }
             _ => (),
         }

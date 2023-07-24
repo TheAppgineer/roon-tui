@@ -64,6 +64,8 @@ impl<T> StatefulList<T> {
     fn select_first(&mut self) {
         self.state.select(Some(0));
         self.item_line_count.clear();
+
+        // Refresh paging
         self.page_lines = 0;
     }
 
@@ -198,20 +200,32 @@ impl App {
                     self.core_name = name;
                 }
                 IoEvent::BrowseTitle(browse_title) => {
+                    if self.selected_view.is_none() {
+                        self.selected_view = Some(View::Browse);
+                    }
+
                     self.browse.title = Some(browse_title);
                 }
-                IoEvent::BrowseList(items) => {
-                    self.browse.items = Some(items);
+                IoEvent::BrowseList(offset, mut items) => {
+                    if offset == 0 {
+                        self.browse.items = Some(items);
 
-                    if let Some(view) = self.selected_view.as_ref() {
-                        if *view == View::Browse {
-                            self.browse.select_first();
+                        if let Some(view) = self.selected_view.as_ref() {
+                            if *view == View::Browse {
+                                self.browse.select_first();
+                            }
                         }
-                    }
-                }
-                IoEvent::BrowseAppend(mut append_items) => {
-                    if let Some(items) = self.browse.items.as_mut() {
-                        items.append(&mut append_items);
+                    } else {
+                        if let Some(browse_items) = self.browse.items.as_mut() {
+                            if offset == browse_items.len() {
+                                browse_items.append(&mut items);
+
+                                // Refresh paging
+                                self.browse.page_lines = 0;
+                            } else {
+                                self.to_roon.send(IoEvent::BrowseRefresh).await.unwrap();
+                            }
+                        }
                     }
                 }
                 _ => ()

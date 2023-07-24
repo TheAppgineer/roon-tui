@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Span, Line},
-    widgets::{block::{self, Block}, BorderType, Borders, List, ListItem, Padding, Paragraph},
+    widgets::{block::{self, Block, Title}, BorderType, Borders, List, ListItem, Padding, Paragraph},
 };
 
 use crate::app::{App, View};
@@ -63,6 +63,13 @@ where
 
     app.prepare_browse_paging(list_height);
 
+    // Browse view
+    let browse_title = format!("[ {} ]", app.browse.title.as_deref().unwrap_or("Browse"));
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(get_view_style(app, View::Browse))
+        .title(browse_title);
+
     if let Some(browse_items) = &app.browse.items {
         let items: Vec<ListItem> = browse_items
             .iter()
@@ -96,31 +103,27 @@ where
 
         // We can now render the item list
         frame.render_stateful_widget(items, top_chunks[0], &mut app.browse.state);
+
+        if let Some(selected_view) = app.selected_view.as_ref() {
+            if *selected_view == View::Browse {
+                let progress = format!(
+                    "[ {}/{} ]",
+                    app.browse.state.selected().unwrap() + 1,
+                    browse_items.len()
+                );
+
+                block = block.title(Title::from(progress).alignment(Alignment::Right));
+            }
+        }
     }
 
-    // [ Browse ] view
-    let browse_title = format!("[ {} ]", app.browse.title.as_deref().unwrap_or("Browse"));
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(get_view_style(app, View::Browse))
-        .title(
-            Span::styled(
-                browse_title, 
-                get_view_style(app, View::Browse)
-            )
-        );
     frame.render_widget(block, top_chunks[0]);
 
     // [ Queue ] view
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(get_view_style(app, View::Queue))
-        .title(
-            Span::styled(
-                "[ Queue ]",
-                get_view_style(app, View::Queue),
-            )
-        )
+        .title("[ Queue ]")
         .title_alignment(Alignment::Right);
     frame.render_widget(block, top_chunks[1]);
 
@@ -128,12 +131,7 @@ where
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(get_view_style(app, View::NowPlaying))
-        .title(
-            Span::styled(
-                "[ Now Playing ]",
-                get_view_style(app, View::NowPlaying),
-            )
-        )
+        .title("[ Now Playing ]")
         .title_position(block::Position::Bottom)
         .padding(Padding {
             left: 2,

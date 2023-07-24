@@ -11,9 +11,9 @@ pub enum IoEvent {
     Tick,
     CoreName(Option<String>),
     BrowseTitle(String),
-    BrowseList(Vec<browse::Item>),
-    BrowseAppend(Vec<browse::Item>),
+    BrowseList(usize, Vec<browse::Item>),
     BrowseSelected(Option<String>),
     BrowseBack,
+    BrowseRefresh,
     BrowseHome,
 }
