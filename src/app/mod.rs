@@ -23,7 +23,9 @@ pub enum View {
 struct StatefulList<T> {
     title: Option<String>,
     state: ListState,
-    items: Option<Vec<T>>
+    items: Option<Vec<T>>,
+    item_line_count: Vec<usize>,
+    page_lines: usize,
 }
 
 impl<T> StatefulList<T> {
@@ -31,7 +33,9 @@ impl<T> StatefulList<T> {
         StatefulList {
             title: None,
             state: ListState::default(),
-            items: None
+            items: None,
+            item_line_count: Vec::new(),
+            page_lines: 0,
         }
     }
 
@@ -54,7 +58,86 @@ impl<T> StatefulList<T> {
     }
 
     fn select(&mut self) {
+        self.select_first();
+    }
+
+    fn select_first(&mut self) {
         self.state.select(Some(0));
+        self.item_line_count.clear();
+        self.page_lines = 0;
+    }
+
+    fn select_last(&mut self) {
+        if let Some(items) = self.items.as_ref() {
+            let last = items.len() - 1;
+
+            self.state.select(Some(last));
+        }
+    }
+
+    fn select_next_page(&mut self) {
+        if let Some(selected) = self.state.selected() {
+            let offset = self.state.offset();
+            let item_count = self.items.as_ref().unwrap().len();
+            let mut counted_lines: usize = 0;
+
+            if offset < selected {
+                for i in offset..selected {
+                    counted_lines += self.item_line_count[i];
+                }
+
+                if counted_lines >= self.page_lines {
+                    *self.state.offset_mut() = selected;
+                }
+            }
+
+            counted_lines = 0;
+
+            for i in selected..item_count {
+                counted_lines += self.item_line_count[i];
+
+                if counted_lines == self.page_lines {
+                    self.state.select(Some(i));
+                    break;
+                } else if counted_lines > self.page_lines {
+                    // Skip the incomplete item at the end
+                    self.state.select(Some(i - 1));
+                    break;
+                }
+            }
+
+            if counted_lines < self.page_lines {
+                self.select_last();
+            }
+        }
+    }
+
+    fn select_prev_page(&mut self) {
+        if let Some(selected) = self.state.selected() {
+            let mut offset = self.state.offset();
+            let mut counted_lines: usize = 0;
+
+            if offset != selected {
+                offset = selected;
+            }
+
+            for i in 0..=selected {
+                counted_lines += self.item_line_count[selected - i];
+
+                if offset == 0 {
+                    self.select_first();
+
+                    return;
+                } else if counted_lines >= self.page_lines {
+                    *self.state.offset_mut() = offset;
+                    self.state.select(Some(offset));
+
+                    return;
+                }
+
+                offset -= 1;
+            }
+        }
     }
 
     fn deselect(&mut self) {
@@ -122,7 +205,7 @@ impl App {
 
                     if let Some(view) = self.selected_view.as_ref() {
                         if *view == View::Browse {
-                            self.browse.state.select(Some(0));
+                            self.browse.select_first();
                         }
                     }
                 }
@@ -167,16 +250,32 @@ impl App {
             KeyCode::Esc => {
                 self.to_roon.send(IoEvent::BrowseBack).await.unwrap();
             }
-            KeyCode::Home => self.browse.state.select(Some(0)),
-            KeyCode::End => {
-                if let Some(items) = self.browse.items.as_ref() {
-                    let last = items.len() - 1;
-    
-                    self.browse.state.select(Some(last));
-                }
-            }
+            KeyCode::Home => self.browse.select_first(),
+            KeyCode::End => self.browse.select_last(),
+            KeyCode::PageUp => self.browse.select_prev_page(),
+            KeyCode::PageDown => self.browse.select_next_page(),
             KeyCode::Char('h') => self.to_roon.send(IoEvent::BrowseHome).await.unwrap(),
             _ => (),
+        }
+    }
+
+    fn prepare_browse_paging(&mut self, page_lines: usize) {
+        if page_lines != self.browse.page_lines {
+            let mut item_line_count = Vec::new();
+
+            if let Some(items) = self.browse.items.as_ref() {
+                for i in 0..items.len() {
+                    let line_count = if items[i].subtitle.is_some() {2usize} else {1usize};
+    
+                    item_line_count.push(line_count);
+                }
+    
+                if item_line_count.len() != items.len() {
+                    panic!();
+                }
+            }
+            self.browse.item_line_count = item_line_count;
+            self.browse.page_lines = page_lines;
         }
     }
 

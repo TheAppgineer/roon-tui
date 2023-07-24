@@ -58,24 +58,27 @@ where
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
         .split(chunks[0]);
 
-    // Iterate through all elements in the `items` app and append some debug text to it.
+    // Exclude the upper and lower border from the height
+    let list_height = (top_chunks[0].height - 2) as usize;
+
+    app.prepare_browse_paging(list_height);
+
     if let Some(browse_items) = &app.browse.items {
         let items: Vec<ListItem> = browse_items
-        .iter()
-        .map(|item| {
-            let subtitle = item.subtitle.as_ref().filter(|s| !s.is_empty());
-            let mut lines = vec![
-                Line::from(Span::styled(&item.title, Style::default().add_modifier(Modifier::BOLD)))
-            ];
+            .iter()
+            .map(|item| {
+                let subtitle = item.subtitle.as_ref().filter(|s| !s.is_empty());
+                let mut lines = vec![
+                    Line::from(Span::styled(&item.title, Style::default().add_modifier(Modifier::BOLD)))
+                ];
 
-            if let Some(subtitle) = subtitle {
-                let subtitle = format!("  ({})", subtitle);
+                if let Some(subtitle) = subtitle {
+                    lines.push(Line::from(format!("  ({})", subtitle)));
+                }
 
-                lines.push(Line::from(Span::styled(subtitle, Style::default())));
-            }
-            ListItem::new(lines).style(Style::default())
-        })
-        .collect();
+                ListItem::new(lines).style(Style::default())
+            })
+            .collect();
 
         // Create a List from all list items and highlight the currently selected one
         let items = List::new(items)
