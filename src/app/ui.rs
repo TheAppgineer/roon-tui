@@ -1,10 +1,10 @@
 use ratatui::{
     backend::Backend,
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Span, Line},
-    widgets::{block::{self, Block, Title}, BorderType, Borders, List, ListItem, Padding, Paragraph},
+    widgets::{block::{self, Block, Title}, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph},
 };
 
 use crate::app::{App, View};
@@ -25,9 +25,6 @@ pub fn draw<B>(frame: &mut Frame<B>, app: &mut App)
 where
     B: Backend,
 {
-    // Wrapping block for a group
-    // Just draw the block and the group on the same area and build the group
-    // with at least a margin of 1
     let size = frame.size();
 
     // Surrounding block
@@ -49,7 +46,7 @@ where
         .direction(Direction::Vertical)
         .horizontal_margin(2)
         .vertical_margin(1)
-        .constraints([Constraint::Percentage(75), Constraint::Percentage(25)].as_ref())
+        .constraints([Constraint::Percentage(80), Constraint::Percentage(20)].as_ref())
         .split(frame.size());
 
     // Top two inner blocks
@@ -58,17 +55,15 @@ where
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
         .split(chunks[0]);
 
-    // Exclude the upper and lower border from the height
-    let list_height = (top_chunks[0].height - 2) as usize;
-
-    app.prepare_browse_paging(list_height);
-
     // Browse view
     let browse_title = format!("[ {} ]", app.browse.title.as_deref().unwrap_or("Browse"));
+    let list_height = (top_chunks[0].height - 2) as usize;  // Exclude border
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(get_view_style(app, View::Browse))
         .title(browse_title);
+
+    app.prepare_browse_paging(list_height);
 
     if let Some(browse_items) = &app.browse.items {
         let items: Vec<ListItem> = browse_items
@@ -88,21 +83,20 @@ where
             .collect();
 
         // Create a List from all list items and highlight the currently selected one
-        let items = List::new(items)
+        let list = List::new(items)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("List")
             )
             .highlight_style(
                 Style::default()
                     .bg(ROON_BRAND_COLOR)
-                    .add_modifier(Modifier::BOLD),
+                    .add_modifier(Modifier::BOLD)
             )
             .highlight_symbol(PLAY);
 
         // We can now render the item list
-        frame.render_stateful_widget(items, top_chunks[0], &mut app.browse.state);
+        frame.render_stateful_widget(list, top_chunks[0], &mut app.browse.state);
 
         if let Some(selected_view) = app.selected_view.as_ref() {
             if *selected_view == View::Browse {
@@ -144,6 +138,49 @@ where
         .style(Style::default().add_modifier(Modifier::DIM))
         .block(block);
     frame.render_widget(text, chunks[1]);
+
+    if let Some(view) = &app.selected_view {
+        if *view == View::Zones {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(get_view_style(app, View::Zones))
+                .title("[ Playback Zones ]")
+                .title_alignment(Alignment::Center);
+
+            let area = bottom_right_rect(50, 50, top_chunks[1]);
+
+            frame.render_widget(Clear, area); //this clears out the background
+
+            if let Some(zones) = app.zones.items.as_ref() {
+                let items: Vec<ListItem> = zones
+                    .iter()
+                    .map(|(_, name)| {
+                        let line = Span::styled(name, Style::default()
+                            .add_modifier(Modifier::BOLD));
+                        ListItem::new(Line::from(line)).style(Style::default())
+                    })
+                    .collect();
+    
+                // Create a List from all list items and highlight the currently selected one
+                let list = List::new(items)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                    )
+                    .highlight_style(
+                        Style::default()
+                            .bg(ROON_BRAND_COLOR)
+                            .add_modifier(Modifier::BOLD)
+                    )
+                    .highlight_symbol(PLAY);
+    
+                // We can now render the item list
+                frame.render_stateful_widget(list, area, &mut app.zones.state);
+            }
+
+            frame.render_widget(block, area);
+        }
+    }
 }
 
 fn get_view_style(app: &App, view: View) -> Style {
@@ -156,4 +193,28 @@ fn get_view_style(app: &App, view: View) -> Style {
     }
 
     style
+}
+
+fn bottom_right_rect(percent_x: u16, percent_y: u16, rect: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage(100 - percent_y),
+                Constraint::Percentage(percent_y),
+            ]
+            .as_ref(),
+        )
+        .split(rect);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage(100 - percent_x),
+                Constraint::Percentage(percent_x),
+            ]
+            .as_ref(),
+        )
+        .split(popup_layout[1])[1]
 }

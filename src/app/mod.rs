@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::widgets::ListState;
 use rust_roon_api::browse;
 use tokio::sync::mpsc;
@@ -18,6 +18,7 @@ pub enum View {
     Browse = 0,
     Queue = 1,
     NowPlaying = 2,
+    Zones = 3,
 }
 
 struct StatefulList<T> {
@@ -57,16 +58,21 @@ impl<T> StatefulList<T> {
         }
     }
 
-    fn select(&mut self) {
-        self.select_first();
-    }
+    fn select(&mut self, index: Option<usize>) {
+        if index.is_some() {
+            self.state.select(index);
+        } else {
+            self.state.select(Some(0));
+        }
 
-    fn select_first(&mut self) {
-        self.state.select(Some(0));
         self.item_line_count.clear();
 
         // Refresh paging
         self.page_lines = 0;
+    }
+
+    fn select_first(&mut self) {
+        self.select(Some(0));
     }
 
     fn select_last(&mut self) {
@@ -153,7 +159,11 @@ pub struct App {
     from_roon: mpsc::Receiver<IoEvent>,
     core_name: Option<String>,
     selected_view: Option<View>,
+    prev_view: Option<View>,
     browse: StatefulList<browse::Item>,
+    pending_item_key: Option<String>,
+    zones: StatefulList<(String, String)>,
+    selected_zone: Option<(String, String)>,
 }
 
 impl App {
@@ -163,7 +173,11 @@ impl App {
             from_roon,
             core_name: None,
             selected_view: None,
+            prev_view: None,
             browse: StatefulList::new(),
+            pending_item_key: None,
+            zones: StatefulList::new(),
+            selected_zone: None,
         }
     }
 
@@ -173,12 +187,18 @@ impl App {
             match key.code {
                 // Global key codes
                 KeyCode::Tab => self.select_next_view(),
+                KeyCode::Char('z') => {
+                    if key.modifiers == KeyModifiers::CONTROL {
+                        self.select_view(Some(View::Zones));
+                    }
+                }
                 KeyCode::Char('q') => return AppReturn::Exit,
                 _ => {
-                    // View specific key codes
+                    // Key codes specific to the active view
                     if let Some(view) = self.selected_view.as_ref() {
                         match *view {
-                            View::Browse => self.handle_browse_key_codes(key.code).await,
+                            View::Browse => self.handle_browse_key_codes(key).await,
+                            View::Zones => self.handle_zone_key_codes(key).await,
                             _ => (),
                         }
                     }
@@ -215,18 +235,23 @@ impl App {
                                 self.browse.select_first();
                             }
                         }
-                    } else {
-                        if let Some(browse_items) = self.browse.items.as_mut() {
-                            if offset == browse_items.len() {
-                                browse_items.append(&mut items);
+                    } else if let Some(browse_items) = self.browse.items.as_mut() {
+                        if offset == browse_items.len() {
+                            browse_items.append(&mut items);
 
-                                // Refresh paging
-                                self.browse.page_lines = 0;
-                            } else {
-                                self.to_roon.send(IoEvent::BrowseRefresh).await.unwrap();
-                            }
+                            // Refresh paging
+                            self.browse.page_lines = 0;
+                        } else {
+                            self.to_roon.send(IoEvent::BrowseRefresh).await.unwrap();
                         }
                     }
+                }
+                IoEvent::Zones(zones) => {
+                    self.zones.items = Some(zones);
+                }
+                IoEvent::ZoneSelect => {
+                    self.pending_item_key = self.get_item_key();
+                    self.select_view(Some(View::Zones));
                 }
                 _ => ()
             }
@@ -235,40 +260,106 @@ impl App {
         AppReturn::Continue
     }
 
-    pub fn select_next_view(&mut self) {
+    fn select_view(&mut self, view: Option<View>) {
+        self.prev_view = self.selected_view.take();
+
+        if let Some(view) = &view {
+            match view {
+                View::Browse => {
+                    self.browse.select(None);
+                    self.zones.deselect();
+                }
+                View::Zones => {
+                    let index = if let Some((sel_zone_id, _)) = &self.selected_zone {
+                        if let Some(items) = self.zones.items.as_ref() {
+                            items
+                                .iter()
+                                .position(|(zone_id, _)| *zone_id == *sel_zone_id)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    self.zones.select(index);
+                    self.browse.deselect();
+                }
+                _  => {
+                    self.browse.deselect();
+                    self.zones.deselect();
+                }
+            };
+        }
+
+        self.selected_view = view;
+    }
+
+    fn select_next_view(&mut self) {
         let view_order = vec![View::Browse, View::Queue, View::NowPlaying];
         let next = match self.selected_view.as_ref() {
             Some(selected_view) => view_order.get(selected_view.to_owned() as usize + 1),
             None => view_order.get(0),
         };
-
         let next = next.cloned().unwrap_or(View::Browse);
 
-        match next {
-            View::Browse => self.browse.select(),
-            _  => self.browse.deselect(),
-        };
-
-        self.selected_view = Some(next);
+        self.select_view(Some(next));
     }
 
-    async fn handle_browse_key_codes(&mut self, key_code: KeyCode) {
-        match key_code {
+    fn restore_view(&mut self) {
+        let prev_view = self.prev_view.take();
+        self.select_view(prev_view);
+    }
+
+    fn get_selected_view(&self) -> Option<&View> {
+        self.selected_view.as_ref()
+    }
+
+    async fn handle_browse_key_codes(&mut self, key: KeyEvent) {
+        match key.code {
             KeyCode::Up => self.browse.prev(),
             KeyCode::Down => self.browse.next(),
             KeyCode::Enter => {
-                let item_key = self.get_item_key();
+                let zone_id = self.selected_zone
+                    .as_ref()
+                    .map(|(zone_id, _)| zone_id.to_owned());
+                let opts = (self.get_item_key(), zone_id);
     
-                self.to_roon.send(IoEvent::BrowseSelected(item_key)).await.unwrap();
+                self.to_roon.send(IoEvent::BrowseSelected(opts)).await.unwrap();
             }
-            KeyCode::Esc => {
-                self.to_roon.send(IoEvent::BrowseBack).await.unwrap();
+            KeyCode::Esc => self.to_roon.send(IoEvent::BrowseBack).await.unwrap(),
+            KeyCode::Home => {
+                match key.modifiers {
+                    KeyModifiers::NONE => self.browse.select_first(),
+                    KeyModifiers::CONTROL => self.to_roon.send(IoEvent::BrowseHome).await.unwrap(),
+                    _ => (),
+                }
             }
-            KeyCode::Home => self.browse.select_first(),
             KeyCode::End => self.browse.select_last(),
             KeyCode::PageUp => self.browse.select_prev_page(),
             KeyCode::PageDown => self.browse.select_next_page(),
-            KeyCode::Char('h') => self.to_roon.send(IoEvent::BrowseHome).await.unwrap(),
+            KeyCode::F(5) => self.to_roon.send(IoEvent::BrowseRefresh).await.unwrap(),
+            _ => (),
+        }
+    }
+
+    async fn handle_zone_key_codes(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up => self.zones.prev(),
+            KeyCode::Down => self.zones.next(),
+            KeyCode::Home => self.zones.select_first(),
+            KeyCode::End => self.zones.select_last(),
+            KeyCode::Enter => {
+                self.selected_zone = self.get_zone_id();
+                self.restore_view();
+
+                if let Some((zone_id, _)) = self.selected_zone.as_ref() {
+                    let opts = (self.pending_item_key.take(), Some(zone_id.to_owned()));
+    
+                    self.to_roon.send(IoEvent::BrowseSelected(opts)).await.unwrap();
+                }
+            }
+            KeyCode::Esc => self.restore_view(),
             _ => (),
         }
     }
@@ -283,18 +374,11 @@ impl App {
     
                     item_line_count.push(line_count);
                 }
-    
-                if item_line_count.len() != items.len() {
-                    panic!();
-                }
             }
+
             self.browse.item_line_count = item_line_count;
             self.browse.page_lines = page_lines;
         }
-    }
-
-    fn get_selected_view(&self) -> Option<&View> {
-        self.selected_view.as_ref()
     }
 
     fn get_item_key(&self) -> Option<String> {
@@ -302,5 +386,12 @@ impl App {
         let item = self.browse.items.as_ref()?.get(index)?;
 
         item.item_key.to_owned()
+    }
+
+    fn get_zone_id(&self) -> Option<(String, String)> {
+        let index = self.zones.state.selected()?;
+        let item = self.zones.items.as_ref()?.get(index)?;
+
+        Some(item.to_owned())
     }
 }

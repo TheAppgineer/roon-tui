@@ -32,6 +32,7 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
     tokio::spawn(async move {
         let mut browse = None;
         let mut opts: BrowseOpts = BrowseOpts::default();
+        let mut zone_map = HashMap::new();
 
         loop {
             select! {
@@ -39,25 +40,52 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                     match core_event {
                         CoreEvent::Found(mut paired_core) => {
                             browse = paired_core.get_browse().cloned();
-    
+
                             if let Some(browse) = browse.as_ref() {
                                 let opts = BrowseOpts {
                                     pop_all: true,
                                     ..Default::default()
                                 };
-    
+
                                 browse.browse(&opts).await;
-    
-                                let io_event = IoEvent::CoreName(Some(paired_core.display_name));
-                                to_app.send(io_event).await.unwrap();
                             }
+
+                            if let Some(transport) = paired_core.get_transport().as_ref() {
+                                transport.subscribe_zones().await;
+                            }
+
+                            let io_event = IoEvent::CoreName(Some(paired_core.display_name));
+                            to_app.send(io_event).await.unwrap();
                         }
                         CoreEvent::Lost(_) => to_app.send(IoEvent::CoreName(None)).await.unwrap(),
                         _ => (),
                     }
-    
+
                     if let Some((_, parsed)) = msg {
-                        handle_parsed_response(browse.as_ref(), &to_app, parsed).await;
+                        match parsed {
+                            Parsed::Zones(zones) => {
+                                for zone in zones {
+                                    zone_map.insert(zone.zone_id.to_owned(), zone);
+                                }
+
+                                let active_zones: Vec<(String, String)> = zone_map
+                                    .iter()
+                                    .map(|(zone_id, zone)| {
+                                        (zone_id.to_owned(), zone.display_name.to_owned())
+                                    })
+                                    .collect();
+
+                                to_app.send(IoEvent::Zones(active_zones)).await.unwrap();
+                            }
+                            Parsed::ZonesRemoved(zone_ids) => {
+                                for zone_id in zone_ids {
+                                    zone_map.remove(&zone_id);
+                                }
+                            }
+                            _ => {
+                                handle_parsed_response(browse.as_ref(), &to_app, parsed).await;
+                            }
+                        }
                     }
                 }
                 Some(event) = from_app.recv() => {
@@ -68,9 +96,10 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                     opts.refresh_list = false;
 
                     match event {
-                        IoEvent::BrowseSelected(item_key) => {
+                        IoEvent::BrowseSelected((item_key, zone_id)) => {
                             if let Some(browse) = browse.as_ref() {
                                 opts.item_key = item_key;
+                                opts.zone_or_output_id = zone_id;
 
                                 browse.browse(&opts).await;
                             }
@@ -107,7 +136,7 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
 async fn handle_parsed_response(
     browse: Option<&Browse>,
     to_app: &mpsc::Sender<IoEvent>,
-    parsed: Parsed
+    parsed: Parsed,
 ) {
     if let Some(browse) = browse {
         match parsed {
@@ -129,6 +158,12 @@ async fn handle_parsed_response(
                         }
                     }
                     Action::Message => {
+                        let is_error = result.is_error.unwrap();
+                        let message = result.message.unwrap();
+
+                        if is_error && message == "Zone is not configured" {
+                            to_app.send(IoEvent::ZoneSelect).await.unwrap();
+                        }
                     }
                     _ => (),
                 }
