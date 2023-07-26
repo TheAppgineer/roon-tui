@@ -333,12 +333,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.14"
+version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51b9bbe6c47d51fc3e1a9b945965946b4c44142ab8792c50835a980d362c2710"
-dependencies = [
- "cfg-if",
-]
+checksum = "b06a4cde4c0f271a446782e3eff8de789548ce57dbc8eca9292c27f4a42004b4"
 
 [[package]]
 name = "memchr"
@@ -561,7 +558,7 @@ dependencies = [
 [[package]]
 name = "rust-roon-api"
 version = "0.0.1"
-source = "git+https://github.com/TheAppgineer/rust-roon-api.git?rev=25ba619#25ba619360714616a5b3366f15be840c77bb2544"
+source = "git+https://github.com/TheAppgineer/rust-roon-api.git?rev=f300104#f300104a49901184133fa13dbc3542cf3a47be9d"
 dependencies = [
  "futures-util",
  "if-addrs",

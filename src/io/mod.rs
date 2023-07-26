@@ -1,5 +1,5 @@
 use crossterm::event::KeyEvent;
-use rust_roon_api::browse;
+use rust_roon_api::{browse, transport::{QueueItem, QueueChange}};
 
 pub mod events;
 pub mod roon;
@@ -15,6 +15,10 @@ pub enum IoEvent {
     BrowseBack,
     BrowseRefresh,
     BrowseHome,
+    QueueList(Vec<QueueItem>),
+    QueueListChanges(Vec<QueueChange>),
+    QueueSelected(u32),
     Zones(Vec<(String, String)>),
     ZoneSelect,
+    ZoneSelected(String),
 }

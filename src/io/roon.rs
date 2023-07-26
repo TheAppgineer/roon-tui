@@ -31,6 +31,7 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
 
     tokio::spawn(async move {
         let mut browse = None;
+        let mut transport = None;
         let mut opts: BrowseOpts = BrowseOpts::default();
         let mut zone_map = HashMap::new();
 
@@ -40,6 +41,7 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                     match core_event {
                         CoreEvent::Found(mut paired_core) => {
                             browse = paired_core.get_browse().cloned();
+                            transport = paired_core.get_transport().cloned();
 
                             if let Some(browse) = browse.as_ref() {
                                 let opts = BrowseOpts {
@@ -50,7 +52,7 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                                 browse.browse(&opts).await;
                             }
 
-                            if let Some(transport) = paired_core.get_transport().as_ref() {
+                            if let Some(transport) = transport.as_ref() {
                                 transport.subscribe_zones().await;
                             }
 
@@ -125,6 +127,19 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                                 browse.browse(&opts).await;
                             }
                         }
+                        IoEvent::QueueSelected(queue_item_id) => {
+                            if let Some(transport) = transport.as_ref() {
+                                let zone_id = opts.zone_or_output_id.as_ref().unwrap();
+
+                                transport.play_from_here(zone_id, queue_item_id).await;
+                            }
+                        }
+                        IoEvent::ZoneSelected(zone_id) => {
+                            if let Some(transport) = transport.as_ref() {
+                                transport.unsubscribe_queue().await;
+                                transport.subscribe_queue(&zone_id, 100).await;
+                            }
+                        },
                         _ => (),
                     }
                 }
@@ -181,6 +196,12 @@ async fn handle_parsed_response(
                 }
 
                 to_app.send(IoEvent::BrowseList(result.offset, result.items)).await.unwrap();
+            }
+            Parsed::Queue(queue_items) => {
+                to_app.send(IoEvent::QueueList(queue_items)).await.unwrap();
+            },
+            Parsed::QueueChanges(queue_changes) => {
+                to_app.send(IoEvent::QueueListChanges(queue_changes)).await.unwrap();
             }
             _ => (),
         }

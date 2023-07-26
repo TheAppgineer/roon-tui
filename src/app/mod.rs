@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::widgets::ListState;
-use rust_roon_api::browse;
+use rust_roon_api::{browse, transport::{QueueItem, QueueOperation, QueueChange}};
 use tokio::sync::mpsc;
 
 use crate::io::IoEvent;
@@ -151,9 +151,36 @@ impl<T> StatefulList<T> {
     fn deselect(&mut self) {
         self.state.select(None);
     }
+
+    fn is_selected(&self) -> bool {
+        self.state.selected().is_some()
+    }
+
+    fn prepare_paging(&mut self, page_lines: usize, f: fn(&T) -> usize) {
+        if page_lines != self.page_lines {
+            let mut item_line_count = Vec::new();
+
+            if let Some(items) = self.items.as_ref() {
+                for item in items.iter() {
+                    let line_count = f(item);
+    
+                    item_line_count.push(line_count);
+                }
+            }
+
+            self.item_line_count = item_line_count;
+            self.page_lines = page_lines;
+        }
+    }
+
+    fn get_selected_item(&self) -> Option<&T> {
+        let index = self.state.selected()?;
+        let item = self.items.as_ref()?.get(index);
+
+        item
+    }
 }
 
-/// The main application, containing the state
 pub struct App {
     to_roon: mpsc::Sender<IoEvent>,
     from_roon: mpsc::Receiver<IoEvent>,
@@ -164,6 +191,7 @@ pub struct App {
     pending_item_key: Option<String>,
     zones: StatefulList<(String, String)>,
     selected_zone: Option<(String, String)>,
+    queue: StatefulList<QueueItem>,
 }
 
 impl App {
@@ -178,10 +206,10 @@ impl App {
             pending_item_key: None,
             zones: StatefulList::new(),
             selected_zone: None,
+            queue: StatefulList::new(),
         }
     }
 
-    /// Handle a user action
     pub async fn do_action(&mut self, key: KeyEvent) -> AppReturn {
         if key.kind == KeyEventKind::Press {
             match key.code {
@@ -198,6 +226,7 @@ impl App {
                     if let Some(view) = self.selected_view.as_ref() {
                         match *view {
                             View::Browse => self.handle_browse_key_codes(key).await,
+                            View::Queue => self.handle_queue_key_codes(key).await,
                             View::Zones => self.handle_zone_key_codes(key).await,
                             _ => (),
                         }
@@ -246,6 +275,12 @@ impl App {
                         }
                     }
                 }
+                IoEvent::QueueList(queue_list) => {
+                    self.queue.items = Some(queue_list);
+                }
+                IoEvent::QueueListChanges(changes) => {
+                    self.apply_queue_changes(changes);
+                }
                 IoEvent::Zones(zones) => {
                     self.zones.items = Some(zones);
                 }
@@ -260,6 +295,29 @@ impl App {
         AppReturn::Continue
     }
 
+    fn apply_queue_changes(&mut self, changes: Vec<QueueChange>) -> Option<()> {
+        let queue = self.queue.items.as_mut()?;
+
+        for change in changes {
+            match change.operation {
+                QueueOperation::Insert => {
+                    for i in 0..change.items.as_ref()?.len() {
+                        let item = change.items.as_ref()?.get(i)?;
+
+                        queue.insert(change.index + i, item.to_owned());
+                    }
+                }
+                QueueOperation::Remove => {
+                    for _ in 0..change.count? {
+                        queue.remove(change.index);
+                    }
+                }
+            }
+        }
+
+        Some(())
+    }
+
     fn select_view(&mut self, view: Option<View>) {
         self.prev_view = self.selected_view.take();
 
@@ -267,6 +325,12 @@ impl App {
             match view {
                 View::Browse => {
                     self.browse.select(None);
+                    self.queue.deselect();
+                    self.zones.deselect();
+                }
+                View::Queue => {
+                    self.browse.deselect();
+                    self.queue.select(None);
                     self.zones.deselect();
                 }
                 View::Zones => {
@@ -283,10 +347,12 @@ impl App {
                     };
 
                     self.zones.select(index);
+                    self.queue.deselect();
                     self.browse.deselect();
                 }
                 _  => {
                     self.browse.deselect();
+                    self.queue.deselect();
                     self.zones.deselect();
                 }
             };
@@ -343,12 +409,31 @@ impl App {
         }
     }
 
+    async fn handle_queue_key_codes(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up => self.queue.prev(),
+            KeyCode::Down => self.queue.next(),
+            KeyCode::Home => self.queue.select_first(),
+            KeyCode::End => self.queue.select_last(),
+            KeyCode::PageUp => self.queue.select_prev_page(),
+            KeyCode::PageDown => self.queue.select_next_page(),
+            KeyCode::Enter => {
+                if let Some(queue_item_id) = self.get_queue_item_id() {
+                    self.to_roon.send(IoEvent::QueueSelected(queue_item_id)).await.unwrap();
+                }
+            }
+            _ => (),
+        }
+    }
+
     async fn handle_zone_key_codes(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Up => self.zones.prev(),
             KeyCode::Down => self.zones.next(),
             KeyCode::Home => self.zones.select_first(),
             KeyCode::End => self.zones.select_last(),
+            KeyCode::PageUp => self.zones.select_prev_page(),
+            KeyCode::PageDown => self.zones.select_next_page(),
             KeyCode::Enter => {
                 self.selected_zone = self.get_zone_id();
                 self.restore_view();
@@ -357,6 +442,7 @@ impl App {
                     let opts = (self.pending_item_key.take(), Some(zone_id.to_owned()));
     
                     self.to_roon.send(IoEvent::BrowseSelected(opts)).await.unwrap();
+                    self.to_roon.send(IoEvent::ZoneSelected(zone_id.to_owned())).await.unwrap();
                 }
             }
             KeyCode::Esc => self.restore_view(),
@@ -364,34 +450,15 @@ impl App {
         }
     }
 
-    fn prepare_browse_paging(&mut self, page_lines: usize) {
-        if page_lines != self.browse.page_lines {
-            let mut item_line_count = Vec::new();
-
-            if let Some(items) = self.browse.items.as_ref() {
-                for i in 0..items.len() {
-                    let line_count = if items[i].subtitle.is_some() {2usize} else {1usize};
-    
-                    item_line_count.push(line_count);
-                }
-            }
-
-            self.browse.item_line_count = item_line_count;
-            self.browse.page_lines = page_lines;
-        }
+    fn get_item_key(&self) -> Option<String> {
+        self.browse.get_selected_item()?.item_key.to_owned()
     }
 
-    fn get_item_key(&self) -> Option<String> {
-        let index = self.browse.state.selected()?;
-        let item = self.browse.items.as_ref()?.get(index)?;
-
-        item.item_key.to_owned()
+    fn get_queue_item_id(&self) -> Option<u32> {
+        Some(self.queue.get_selected_item()?.queue_item_id)
     }
 
     fn get_zone_id(&self) -> Option<(String, String)> {
-        let index = self.zones.state.selected()?;
-        let item = self.zones.items.as_ref()?.get(index)?;
-
-        Some(item.to_owned())
+        self.zones.get_selected_item().cloned()
     }
 }
