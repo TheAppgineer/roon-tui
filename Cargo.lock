@@ -552,13 +552,15 @@ dependencies = [
  "log",
  "ratatui",
  "rust-roon-api",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
 [[package]]
 name = "rust-roon-api"
 version = "0.0.1"
-source = "git+https://github.com/TheAppgineer/rust-roon-api.git?rev=8e52e4d#8e52e4d0713ea186b5fccf3546f36baf939055f7"
+source = "git+https://github.com/TheAppgineer/rust-roon-api.git?rev=81dcc38#81dcc3820abb4088fdc502ddbcb635f20d5d5c40"
 dependencies = [
  "futures-util",
  "if-addrs",

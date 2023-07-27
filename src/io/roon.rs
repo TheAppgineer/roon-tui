@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tokio::{sync::mpsc, select};
 
 use rust_roon_api::{
@@ -12,9 +14,13 @@ use rust_roon_api::{
     Svc,
     transport::Transport,
 };
-use std::collections::HashMap;
 
 use super::IoEvent;
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct Settings {
+    zone_id: Option<String>,
+}
 
 pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
     let mut info = info!("com.theappgineer", "Roon TUI");
@@ -22,6 +28,7 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
     info.set_log_level(LogLevel::None);
 
     let mut roon = RoonApi::new(info);
+    let mut settings = serde_json::from_value::<Settings>(RoonApi::load_config("settings")).unwrap_or_default();
     let services = vec![
         Services::Browse(Browse::new()),
         Services::Transport(Transport::new()),
@@ -30,11 +37,11 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
     let (_, mut core_rx) = roon.start_discovery(provided, Some(services)).await.unwrap();
 
     tokio::spawn(async move {
+        const QUEUE_ITEM_COUNT: u32 = 100;
         let mut browse = None;
         let mut transport = None;
         let mut opts: BrowseOpts = BrowseOpts::default();
         let mut zone_map = HashMap::new();
-        let mut selected_zone_id = None;
 
         loop {
             select! {
@@ -55,6 +62,10 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
 
                             if let Some(transport) = transport.as_ref() {
                                 transport.subscribe_zones().await;
+
+                                if let Some(zone_id) = settings.zone_id.as_ref() {
+                                    transport.subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
+                                }
                             }
 
                             let io_event = IoEvent::CoreName(Some(paired_core.display_name));
@@ -81,14 +92,14 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
 
                                 to_app.send(IoEvent::Zones(zones)).await.unwrap();
 
-                                if let Some(selected_zone_id) = selected_zone_id.as_ref() {
+                                if let Some(selected_zone_id) = settings.zone_id.as_ref() {
                                     if let Some(zone) = zone_map.get(selected_zone_id) {
                                         to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
                                     }
                                 }
                             }
                             Parsed::ZonesRemoved(zone_ids) => {
-                                if let Some(zone_id) = selected_zone_id.as_ref() {
+                                if let Some(zone_id) = settings.zone_id.as_ref() {
                                     if zone_ids.contains(zone_id) {
                                         to_app.send(IoEvent::ZoneRemoved(zone_id.to_owned())).await.unwrap();
                                     }
@@ -115,7 +126,7 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                         IoEvent::BrowseSelected(item_key) => {
                             if let Some(browse) = browse.as_ref() {
                                 opts.item_key = item_key;
-                                opts.zone_or_output_id = selected_zone_id.to_owned();
+                                opts.zone_or_output_id = settings.zone_id.to_owned();
 
                                 browse.browse(&opts).await;
                             }
@@ -151,13 +162,17 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                         IoEvent::ZoneSelected(zone_id) => {
                             if let Some(transport) = transport.as_ref() {
                                 transport.unsubscribe_queue().await;
-                                transport.subscribe_queue(&zone_id, 100).await;
+                                transport.subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
 
                                 if let Some(zone) = zone_map.get(&zone_id) {
                                     to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
                                 }
 
-                                selected_zone_id = Some(zone_id);
+                                settings.zone_id = Some(zone_id);
+
+                                let settings = settings.serialize(serde_json::value::Serializer).unwrap();
+
+                                RoonApi::save_config("settings", settings.to_owned()).unwrap();
                             }
                         },
                         _ => (),
