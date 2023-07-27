@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::widgets::ListState;
-use rust_roon_api::{browse, transport::{QueueItem, QueueOperation, QueueChange}};
+use rust_roon_api::{browse, transport::{QueueItem, QueueOperation, QueueChange, Zone}};
 use tokio::sync::mpsc;
 
 use crate::io::IoEvent;
@@ -129,18 +129,24 @@ impl<T> StatefulList<T> {
                 offset = selected;
             }
 
-            for i in 0..=selected {
-                counted_lines += self.item_line_count[selected - i];
+            for i in (0..=selected).rev() {
+                counted_lines += self.item_line_count[i];
 
                 if offset == 0 {
                     self.select_first();
 
-                    return;
-                } else if counted_lines >= self.page_lines {
+                    break;
+                } else if counted_lines == self.page_lines {
                     *self.state.offset_mut() = offset;
                     self.state.select(Some(offset));
 
-                    return;
+                    break;
+                } else if counted_lines > self.page_lines {
+                    // Skip the incomplete item at the end
+                    *self.state.offset_mut() = offset + 1;
+                    self.state.select(Some(offset + 1));
+
+                    break;
                 }
 
                 offset -= 1;
@@ -190,7 +196,7 @@ pub struct App {
     browse: StatefulList<browse::Item>,
     pending_item_key: Option<String>,
     zones: StatefulList<(String, String)>,
-    selected_zone: Option<(String, String)>,
+    selected_zone: Option<Zone>,
     queue: StatefulList<QueueItem>,
 }
 
@@ -208,34 +214,6 @@ impl App {
             selected_zone: None,
             queue: StatefulList::new(),
         }
-    }
-
-    pub async fn do_action(&mut self, key: KeyEvent) -> AppReturn {
-        if key.kind == KeyEventKind::Press {
-            match key.code {
-                // Global key codes
-                KeyCode::Tab => self.select_next_view(),
-                KeyCode::Char('z') => {
-                    if key.modifiers == KeyModifiers::CONTROL {
-                        self.select_view(Some(View::Zones));
-                    }
-                }
-                KeyCode::Char('q') => return AppReturn::Exit,
-                _ => {
-                    // Key codes specific to the active view
-                    if let Some(view) = self.selected_view.as_ref() {
-                        match *view {
-                            View::Browse => self.handle_browse_key_codes(key).await,
-                            View::Queue => self.handle_queue_key_codes(key).await,
-                            View::Zones => self.handle_zone_key_codes(key).await,
-                            _ => (),
-                        }
-                    }
-                }
-            }
-        }
-
-        AppReturn::Continue
     }
 
     pub async fn update_on_event(&mut self) -> AppReturn {
@@ -288,6 +266,14 @@ impl App {
                     self.pending_item_key = self.get_item_key();
                     self.select_view(Some(View::Zones));
                 }
+                IoEvent::ZoneChanged(zone) => {
+                    self.selected_zone = Some(zone);
+
+                    if self.pending_item_key.is_some() {
+                        self.to_roon.send(IoEvent::BrowseSelected(self.pending_item_key.take())).await.unwrap();
+                    }
+                }
+                IoEvent::ZoneRemoved(_) => self.selected_zone = None,
                 _ => ()
             }
         }
@@ -334,11 +320,11 @@ impl App {
                     self.zones.deselect();
                 }
                 View::Zones => {
-                    let index = if let Some((sel_zone_id, _)) = &self.selected_zone {
+                    let index = if let Some(zone) = &self.selected_zone {
                         if let Some(items) = self.zones.items.as_ref() {
                             items
                                 .iter()
-                                .position(|(zone_id, _)| *zone_id == *sel_zone_id)
+                                .position(|(zone_id, _)| *zone_id == *zone.zone_id)
                         } else {
                             None
                         }
@@ -381,17 +367,40 @@ impl App {
         self.selected_view.as_ref()
     }
 
+    async fn do_action(&mut self, key: KeyEvent) -> AppReturn {
+        if key.kind == KeyEventKind::Press {
+            match key.code {
+                // Global key codes
+                KeyCode::Tab => self.select_next_view(),
+                KeyCode::Char('z') => {
+                    if key.modifiers == KeyModifiers::CONTROL {
+                        self.select_view(Some(View::Zones));
+                    }
+                }
+                KeyCode::Char('q') => return AppReturn::Exit,
+                _ => {
+                    // Key codes specific to the active view
+                    if let Some(view) = self.selected_view.as_ref() {
+                        match *view {
+                            View::Browse => self.handle_browse_key_codes(key).await,
+                            View::Queue => self.handle_queue_key_codes(key).await,
+                            View::Zones => self.handle_zone_key_codes(key).await,
+                            _ => (),
+                        }
+                    }
+                }
+            }
+        }
+
+        AppReturn::Continue
+    }
+
     async fn handle_browse_key_codes(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Up => self.browse.prev(),
             KeyCode::Down => self.browse.next(),
             KeyCode::Enter => {
-                let zone_id = self.selected_zone
-                    .as_ref()
-                    .map(|(zone_id, _)| zone_id.to_owned());
-                let opts = (self.get_item_key(), zone_id);
-    
-                self.to_roon.send(IoEvent::BrowseSelected(opts)).await.unwrap();
+                self.to_roon.send(IoEvent::BrowseSelected(self.get_item_key())).await.unwrap();
             }
             KeyCode::Esc => self.to_roon.send(IoEvent::BrowseBack).await.unwrap(),
             KeyCode::Home => {
@@ -435,13 +444,10 @@ impl App {
             KeyCode::PageUp => self.zones.select_prev_page(),
             KeyCode::PageDown => self.zones.select_next_page(),
             KeyCode::Enter => {
-                self.selected_zone = self.get_zone_id();
+                let selected_zone_id = self.get_zone_id();
                 self.restore_view();
 
-                if let Some((zone_id, _)) = self.selected_zone.as_ref() {
-                    let opts = (self.pending_item_key.take(), Some(zone_id.to_owned()));
-    
-                    self.to_roon.send(IoEvent::BrowseSelected(opts)).await.unwrap();
+                if let Some(zone_id) = selected_zone_id.as_ref() {
                     self.to_roon.send(IoEvent::ZoneSelected(zone_id.to_owned())).await.unwrap();
                 }
             }
@@ -458,7 +464,7 @@ impl App {
         Some(self.queue.get_selected_item()?.queue_item_id)
     }
 
-    fn get_zone_id(&self) -> Option<(String, String)> {
-        self.zones.get_selected_item().cloned()
+    fn get_zone_id(&self) -> Option<String> {
+        self.zones.get_selected_item().map(|(zone_id, _)| zone_id).cloned()
     }
 }

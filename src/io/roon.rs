@@ -34,6 +34,7 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
         let mut transport = None;
         let mut opts: BrowseOpts = BrowseOpts::default();
         let mut zone_map = HashMap::new();
+        let mut selected_zone_id = None;
 
         loop {
             select! {
@@ -70,16 +71,28 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                                     zone_map.insert(zone.zone_id.to_owned(), zone);
                                 }
 
-                                let active_zones: Vec<(String, String)> = zone_map
+                                let zones: Vec<(String, String)> = zone_map
                                     .iter()
                                     .map(|(zone_id, zone)| {
                                         (zone_id.to_owned(), zone.display_name.to_owned())
                                     })
                                     .collect();
 
-                                to_app.send(IoEvent::Zones(active_zones)).await.unwrap();
+                                to_app.send(IoEvent::Zones(zones)).await.unwrap();
+
+                                if let Some(selected_zone_id) = selected_zone_id.as_ref() {
+                                    if let Some(zone) = zone_map.get(selected_zone_id) {
+                                        to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
+                                    }
+                                }
                             }
                             Parsed::ZonesRemoved(zone_ids) => {
+                                if let Some(zone_id) = selected_zone_id.as_ref() {
+                                    if zone_ids.contains(zone_id) {
+                                        to_app.send(IoEvent::ZoneRemoved(zone_id.to_owned())).await.unwrap();
+                                    }
+                                }
+
                                 for zone_id in zone_ids {
                                     zone_map.remove(&zone_id);
                                 }
@@ -98,10 +111,10 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                     opts.refresh_list = false;
 
                     match event {
-                        IoEvent::BrowseSelected((item_key, zone_id)) => {
+                        IoEvent::BrowseSelected(item_key) => {
                             if let Some(browse) = browse.as_ref() {
                                 opts.item_key = item_key;
-                                opts.zone_or_output_id = zone_id;
+                                opts.zone_or_output_id = selected_zone_id.to_owned();
 
                                 browse.browse(&opts).await;
                             }
@@ -138,6 +151,12 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                             if let Some(transport) = transport.as_ref() {
                                 transport.unsubscribe_queue().await;
                                 transport.subscribe_queue(&zone_id, 100).await;
+
+                                if let Some(zone) = zone_map.get(&zone_id) {
+                                    to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
+                                }
+
+                                selected_zone_id = Some(zone_id);
                             }
                         },
                         _ => (),
