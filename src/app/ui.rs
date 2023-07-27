@@ -18,6 +18,7 @@ const _RELOAD: char = '\u{27f3}';
 const _SHUFFLE: char = '\u{1f500}';
 const _REPEAT: char = '\u{1f501}';
 const _REPEAT_ONCE: char = '\u{1f502}';
+const _SPEAKER: char = '\u{1f508}';
 const _SPEAKER_ONE_WAVE: char = '\u{1f509}';
 const _SPEAKER_THREE_WAVE: char = '\u{1f50a}';
 
@@ -46,7 +47,7 @@ where
         .direction(Direction::Vertical)
         .horizontal_margin(2)
         .vertical_margin(1)
-        .constraints([Constraint::Percentage(80), Constraint::Percentage(20)].as_ref())
+        .constraints([Constraint::Length(14), Constraint::Min(6)].as_ref())
         .split(frame.size());
 
     // Top two inner blocks
@@ -55,15 +56,28 @@ where
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)].as_ref())
         .split(chunks[0]);
 
-    // Browse view
+    draw_browse_view(frame, top_chunks[0], app);
+    draw_queue_view(frame, top_chunks[1], app);
+    draw_now_playing_view(frame, chunks[1], app);
+
+    if let Some(View::Zones) = &app.selected_view {
+        draw_zones_view(frame, top_chunks[1], app);
+    }
+}
+
+fn draw_browse_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
+where
+    B: Backend,
+{
     let browse_title = format!("{}", app.browse.title.as_deref().unwrap_or("Browse"));
-    let page_lines = (top_chunks[0].height - 2) as usize;  // Exclude border
+    let page_lines = if area.height > 2 {area.height - 2} else {0} as usize;  // Exclude border
+    let view = &View::Browse;
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, View::Browse))
+        .border_style(get_border_view_style(&app, view))
         .title(Span::styled(
             browse_title,
-            get_text_view_style(&app, View::Browse),
+            get_text_view_style(&app, view),
         ));
 
     app.browse.prepare_paging(page_lines, |item| if item.subtitle.is_none() {1} else {2});
@@ -74,14 +88,17 @@ where
             .map(|item| {
                 let subtitle = item.subtitle.as_ref().filter(|s| !s.is_empty());
                 let mut lines = vec![
-                    Line::from(Span::styled(&item.title, get_text_view_style(&app, View::Browse)))
+                    Line::from(Span::styled(&item.title, get_text_view_style(&app, view)))
                 ];
 
                 if let Some(subtitle) = subtitle {
-                    lines.push(Line::from(format!("  ({})", subtitle)));
+                    lines.push(Line::from(Span::styled(
+                        format!("  {}", subtitle),
+                        Style::default().add_modifier(Modifier::ITALIC)
+                    )));
                 }
 
-                ListItem::new(lines).style(Style::default())
+                ListItem::new(lines)
             })
             .collect();
 
@@ -105,52 +122,68 @@ where
             .highlight_symbol(PLAY);
 
         // We can now render the item list
-        frame.render_stateful_widget(list, top_chunks[0], &mut app.browse.state);
+        frame.render_stateful_widget(list, area, &mut app.browse.state);
 
-        if let Some(selected_view) = app.selected_view.as_ref() {
-            if *selected_view == View::Browse {
-                let progress = format!(
-                    "{}/{}",
-                    app.browse.state.selected().unwrap() + 1,
-                    browse_items.len()
-                );
+        if let Some(View::Browse) = app.selected_view.as_ref() {
+            let progress = format!(
+                "{}/{}",
+                app.browse.state.selected().unwrap() + 1,
+                browse_items.len()
+            );
 
-                block = block.title(
-                    Title::from(
-                        Span::styled(progress, Style::default().fg(Color::Reset))
-                    ).alignment(Alignment::Right));
-            }
+            block = block.title(
+                Title::from(
+                    Span::styled(progress, Style::default().fg(Color::Reset))
+                ).alignment(Alignment::Right)
+            );
         }
     }
 
-    frame.render_widget(block, top_chunks[0]);
+    frame.render_widget(block, area);
+}
 
-    // [ Queue ] view
-    let page_lines = (top_chunks[1].height - 2) as usize;  // Exclude border
-    let block = Block::default()
+fn draw_queue_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
+where
+    B: Backend,
+{
+    let page_lines = if area.height > 2 {area.height - 2} else {0} as usize;  // Exclude border
+    let view = &View::Queue;
+    let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, View::Queue))
+        .border_style(get_border_view_style(&app, view))
         .title(Span::styled(
             "Queue",
-            get_text_view_style(&app, View::Queue),
+            get_text_view_style(&app, view),
         ))
         .title_alignment(Alignment::Right);
 
     app.queue.prepare_paging(page_lines, |item| if item.two_line.line2.is_empty() {1} else {2});
 
     if let Some(queue_items) = &app.queue.items {
+        let item_len = (area.width - 5) as usize;
         let items: Vec<ListItem> = queue_items
             .iter()
             .map(|item| {
+                let duration = format!(" {}:{} ", item.length / 60, item.length % 60);
+                let max_len = item_len - duration.len();
+                let line_len = item.two_line.line1.len();
+                let trim_len = if line_len < max_len {line_len} else {max_len};
+                let line1 = &item.two_line.line1[0..trim_len];
+                let pad_len = item_len - line1.len() - duration.len();
+                let pad: String = (0..pad_len).map(|_| ' ').collect();
+                let line1 = format!("{}{}{} ", line1, pad, duration);
                 let mut lines = vec![
-                    Line::from(Span::styled(&item.two_line.line1, get_text_view_style(&app, View::Queue))),
+                    Line::from(Span::styled(line1, get_text_view_style(&app, view))),
                 ];
 
                 if !item.two_line.line2.is_empty() {
-                    lines.push(Line::from(format!("  ({})", item.two_line.line2)));
+                    lines.push(Line::from(Span::styled(
+                        format!("  {}", item.two_line.line2),
+                        Style::default().add_modifier(Modifier::ITALIC)
+                    )));
                 }
 
-                ListItem::new(lines).style(Style::default())
+                ListItem::new(lines)
             })
             .collect();
 
@@ -174,83 +207,157 @@ where
             .highlight_symbol(PLAY);
 
         // We can now render the item list
-        frame.render_stateful_widget(list, top_chunks[1], &mut app.queue.state);
+        frame.render_stateful_widget(list, area, &mut app.queue.state);
+
+        if let Some(View::Queue) = app.selected_view.as_ref() {
+            let progress = format!(
+                "{}/{}",
+                app.queue.state.selected().unwrap() + 1,
+                queue_items.len()
+            );
+
+            block = block.title(
+                Title::from(
+                    Span::styled(progress, Style::default().fg(Color::Reset))
+                ).alignment(Alignment::Left)
+            );
+        }
     }
 
-    frame.render_widget(block, top_chunks[1]);
+    frame.render_widget(block, area);
+}
 
-    // [ Now Playing] view
+fn draw_now_playing_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
+where
+    B: Backend,
+{
+    let view = &View::NowPlaying;
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, View::NowPlaying))
+        .border_style(get_border_view_style(&app, view))
         .title(Span::styled(
             "Now Playing",
-            get_text_view_style(&app, View::NowPlaying),
+            get_text_view_style(&app, view),
         ))
         .title_position(block::Position::Bottom)
         .padding(Padding {
-            left: 2,
-            right: 2,
+            left: 3,
+            right: 0,
             top: 0,
             bottom: 0,
         });
 
-    let text = Paragraph::new("Track\nArtist\nAlbum")
-        .style(Style::default().add_modifier(Modifier::DIM))
-        .block(block);
-    frame.render_widget(text, chunks[1]);
+    frame.render_widget(block, area);
 
-    if let Some(View::Zones) = &app.selected_view {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(get_border_view_style(&app, View::Zones))
-            .title("[ Playback Zones ]")
-            .title_alignment(Alignment::Center);
+    // Two inner blocks
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+        .split(area);
 
-        let area = bottom_right_rect(50, 50, top_chunks[1]);
-        let page_lines = (area.height - 2) as usize;  // Exclude border
+    if let Some(zone) = app.selected_zone.as_ref() {
+        if let Some(now_playing) = zone.now_playing.as_ref() {
+            let metadata_block = Block::default()
+                .padding(Padding {
+                    left: 4,
+                    right: 0,
+                    top: 1,
+                    bottom: 0,
+                });
+            let lines = vec![
+                Line::from(Span::styled(
+                    &now_playing.three_line.line1,
+                    Style::default().add_modifier(Modifier::BOLD)
+                )),
+                Line::from(now_playing.three_line.line2.as_str()),
+                Line::from(Span::styled(
+                    &now_playing.three_line.line3,
+                    Style::default().add_modifier(Modifier::ITALIC)
+                )),
+            ];
+            let text = Paragraph::new(lines)
+                .style(Style::default().add_modifier(Modifier::DIM))
+                .block(metadata_block);
 
-        frame.render_widget(Clear, area); //this clears out the background
+            frame.render_widget(text, chunks[0]);
 
-        app.zones.prepare_paging(page_lines, |_| 1);
+            let zone_block = Block::default()
+                .padding(Padding {
+                    left: 2,
+                    right: 2,
+                    top: 1,
+                    bottom: 0,
+                });
+            let lines = vec![
+                Line::from(zone.display_name.as_str()).alignment(Alignment::Right),
+            ];
+            let text = Paragraph::new(lines)
+                .style(Style::default().add_modifier(Modifier::DIM))
+                .block(zone_block);
 
-        if let Some(zones) = app.zones.items.as_ref() {
-            let items: Vec<ListItem> = zones
-                .iter()
-                .map(|(_, name)| {
-                    let line = Span::styled(
-                        name,
-                        get_text_view_style(&app, View::Zones));
-                    ListItem::new(Line::from(line)).style(Style::default())
-                })
-                .collect();
-
-            // Create a List from all list items and highlight the currently selected one
-            let list = List::new(items)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                )
-                .highlight_style(
-                    Style::default()
-                        .bg(ROON_BRAND_COLOR)
-                        .add_modifier(Modifier::BOLD)
-                )
-                .highlight_symbol(PLAY);
-
-            // We can now render the item list
-            frame.render_stateful_widget(list, area, &mut app.zones.state);
+            frame.render_widget(text, chunks[1]);
         }
-
-        frame.render_widget(block, area);
     }
+
 }
 
-fn get_border_view_style(app: &App, view: View) -> Style {
+fn draw_zones_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
+where
+    B: Backend,
+{
+    let view = &View::Zones;
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(get_border_view_style(&app, view))
+        .title(Span::styled(
+            "Zones",
+            get_text_view_style(&app, view),
+        ))
+        .title_alignment(Alignment::Left);
+
+    let area = bottom_right_rect(50, 50, area);
+    let page_lines = if area.height > 2 {area.height - 2} else {0} as usize;  // Exclude border
+
+    frame.render_widget(Clear, area); //this clears out the background
+
+    app.zones.prepare_paging(page_lines, |_| 1);
+
+    if let Some(zones) = app.zones.items.as_ref() {
+        let items: Vec<ListItem> = zones
+            .iter()
+            .map(|(_, name)| {
+                let line = Span::styled(
+                    name,
+                    get_text_view_style(&app, view));
+                ListItem::new(Line::from(line)).style(Style::default())
+            })
+            .collect();
+
+        // Create a List from all list items and highlight the currently selected one
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(ROON_BRAND_COLOR)
+                    .add_modifier(Modifier::BOLD)
+            )
+            .highlight_symbol(PLAY);
+
+        // We can now render the item list
+        frame.render_stateful_widget(list, area, &mut app.zones.state);
+    }
+
+    frame.render_widget(block, area);
+}
+
+fn get_border_view_style(app: &App, view: &View) -> Style {
     let mut style = Style::default();
 
     if let Some(selected_view) = app.get_selected_view() {
-        if *selected_view == view {
+        if *selected_view == *view {
             style = style.fg(ROON_BRAND_COLOR);
         }
     }
@@ -258,11 +365,11 @@ fn get_border_view_style(app: &App, view: View) -> Style {
     style
 }
 
-fn get_text_view_style(app: &App, view: View) -> Style {
+fn get_text_view_style(app: &App, view: &View) -> Style {
     let mut style = Style::default();
 
     if let Some(selected_view) = app.get_selected_view() {
-        if *selected_view == view {
+        if *selected_view == *view {
             style = style.fg(Color::Reset).add_modifier(Modifier::BOLD);
         }
     }

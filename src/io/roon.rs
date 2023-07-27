@@ -71,12 +71,13 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                                     zone_map.insert(zone.zone_id.to_owned(), zone);
                                 }
 
-                                let zones: Vec<(String, String)> = zone_map
+                                let mut zones: Vec<(String, String)> = zone_map
                                     .iter()
                                     .map(|(zone_id, zone)| {
                                         (zone_id.to_owned(), zone.display_name.to_owned())
                                     })
                                     .collect();
+                                zones.sort_by(|a, b| a.1.cmp(&b.1));
 
                                 to_app.send(IoEvent::Zones(zones)).await.unwrap();
 
