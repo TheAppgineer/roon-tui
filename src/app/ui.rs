@@ -4,13 +4,15 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Span, Line},
-    widgets::{block::{self, Block, Title}, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph},
+    widgets::{block::{self, Block, Title}, BorderType, Borders, Clear, Gauge, List, ListItem, Padding, Paragraph},
 };
+use rust_roon_api::transport::State;
 
 use crate::app::{App, View};
 
 const ROON_BRAND_COLOR: Color = Color::Rgb(0x75, 0x75, 0xf3);
 
+const _LOAD: char = '\u{23f3}';
 const PLAY: &str = " \u{23f5} ";
 const _PAUSE: char = '\u{23f8}';
 const _STOP: char = '\u{23f9}';
@@ -47,7 +49,7 @@ where
         .direction(Direction::Vertical)
         .horizontal_margin(2)
         .vertical_margin(1)
-        .constraints([Constraint::Length(14), Constraint::Min(6)].as_ref())
+        .constraints([Constraint::Min(8), Constraint::Length(7)].as_ref())
         .split(frame.size());
 
     // Top two inner blocks
@@ -58,7 +60,7 @@ where
 
     draw_browse_view(frame, top_chunks[0], app);
     draw_queue_view(frame, top_chunks[1], app);
-    draw_now_playing_view(frame, chunks[1], app);
+    draw_now_playing_view(frame, chunks[1], &app);
 
     if let Some(View::Zones) = &app.selected_view {
         draw_zones_view(frame, top_chunks[1], app);
@@ -125,17 +127,21 @@ where
         frame.render_stateful_widget(list, area, &mut app.browse.state);
 
         if let Some(View::Browse) = app.selected_view.as_ref() {
-            let progress = format!(
-                "{}/{}",
-                app.browse.state.selected().unwrap() + 1,
-                browse_items.len()
-            );
+            let len = browse_items.len();
 
-            block = block.title(
-                Title::from(
-                    Span::styled(progress, Style::default().fg(Color::Reset))
-                ).alignment(Alignment::Right)
-            );
+            if len > 0 {
+                let progress = format!(
+                    "{}/{}",
+                    app.browse.state.selected().unwrap() + 1,
+                    len
+                );
+    
+                block = block.title(
+                    Title::from(
+                        Span::styled(progress, Style::default().fg(Color::Reset))
+                    ).alignment(Alignment::Right)
+                );
+            }
         }
     }
 
@@ -164,7 +170,7 @@ where
         let items: Vec<ListItem> = queue_items
             .iter()
             .map(|item| {
-                let duration = format!(" {}:{} ", item.length / 60, item.length % 60);
+                let duration = format!(" {}:{:02} ", item.length / 60, item.length % 60);
                 let max_len = item_len - duration.len();
                 let line_len = item.two_line.line1.len();
                 let trim_len = if line_len < max_len {line_len} else {max_len};
@@ -210,52 +216,55 @@ where
         frame.render_stateful_widget(list, area, &mut app.queue.state);
 
         if let Some(View::Queue) = app.selected_view.as_ref() {
-            let progress = format!(
-                "{}/{}",
-                app.queue.state.selected().unwrap() + 1,
-                queue_items.len()
-            );
+            let len = queue_items.len();
 
-            block = block.title(
-                Title::from(
-                    Span::styled(progress, Style::default().fg(Color::Reset))
-                ).alignment(Alignment::Left)
-            );
+            if len > 0 {
+                let progress = format!(
+                    "{}/{}",
+                    app.queue.state.selected().unwrap() + 1,
+                    len
+                );
+    
+                block = block.title(
+                    Title::from(
+                        Span::styled(progress, Style::default().fg(Color::Reset))
+                    ).alignment(Alignment::Left)
+                );
+            }
         }
     }
 
     frame.render_widget(block, area);
 }
 
-fn draw_now_playing_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
+fn draw_now_playing_view<B>(frame: &mut Frame<B>, area: Rect, app: &App)
 where
     B: Backend,
 {
     let view = &View::NowPlaying;
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, view))
-        .title(Span::styled(
-            "Now Playing",
-            get_text_view_style(&app, view),
-        ))
+        .border_style(get_border_view_style(app, view))
         .title_position(block::Position::Bottom)
         .padding(Padding {
-            left: 3,
+            left: 1,
             right: 0,
             top: 0,
             bottom: 0,
         });
 
-    frame.render_widget(block, area);
-
-    // Two inner blocks
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
-        .split(area);
-
     if let Some(zone) = app.selected_zone.as_ref() {
+        let vert_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(2)].as_ref())
+            .split(area);
+
+        block = block.title(
+            Title::from(
+                Span::styled(zone.display_name.as_str(), get_text_view_style(app, view))
+            ).alignment(Alignment::Right)
+        );
+
         if let Some(now_playing) = zone.now_playing.as_ref() {
             let metadata_block = Block::default()
                 .padding(Padding {
@@ -276,29 +285,56 @@ where
                 )),
             ];
             let text = Paragraph::new(lines)
-                .style(Style::default().add_modifier(Modifier::DIM))
                 .block(metadata_block);
 
-            frame.render_widget(text, chunks[0]);
+            frame.render_widget(text, vert_chunks[0]);
 
-            let zone_block = Block::default()
-                .padding(Padding {
-                    left: 2,
-                    right: 2,
-                    top: 1,
-                    bottom: 0,
-                });
-            let lines = vec![
-                Line::from(zone.display_name.as_str()).alignment(Alignment::Right),
-            ];
-            let text = Paragraph::new(lines)
-                .style(Style::default().add_modifier(Modifier::DIM))
-                .block(zone_block);
+            let duration = now_playing.length.unwrap_or_default();
+            draw_progress_gauge(frame, vert_chunks[1], app, duration);
 
-            frame.render_widget(text, chunks[1]);
+            let play_state_title = match zone.state {
+                State::Loading => "Loading",
+                State::Paused => "Paused",
+                State::Playing => "Playing",
+                State::Stopped => "Stopped",
+            };
+
+            block = block.title(Span::styled(
+                play_state_title,
+                get_text_view_style(app, view),
+            ));
         }
     }
 
+    frame.render_widget(block, area);
+}
+
+fn draw_progress_gauge<B>(frame: &mut Frame<B>, area: Rect, app: &App, duration: u32) -> Option<()>
+where
+    B: Backend,
+{
+    let elapsed = app.zone_seek.as_ref()?.seek_position? as u32;
+    let progress = if duration > 0 {elapsed * 100 / duration} else {0};
+    let elapsed = format!("{}:{:02}", elapsed / 60, elapsed % 60);
+    let label = if duration > 0 {
+        format!("{} / {}:{:02}", elapsed, duration / 60, duration % 60)
+    } else {
+        elapsed
+    };
+    let gauge = Gauge::default()
+        .block(Block::default().padding(Padding {
+            left: 2,
+            right: 2,
+            top: 0,
+            bottom: 1,
+        }))
+        .gauge_style(get_gauge_view_style(app, &View::NowPlaying))
+        .percent(progress as u16)
+        .label(Span::styled(label, Style::default().fg(Color::Reset).add_modifier(Modifier::BOLD)));
+
+    frame.render_widget(gauge, area);
+
+    Some(())
 }
 
 fn draw_zones_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
@@ -318,7 +354,7 @@ where
     let area = bottom_right_rect(50, 50, area);
     let page_lines = if area.height > 2 {area.height - 2} else {0} as usize;  // Exclude border
 
-    frame.render_widget(Clear, area); //this clears out the background
+    frame.render_widget(Clear, area);   // This clears out the background
 
     app.zones.prepare_paging(page_lines, |_| 1);
 
@@ -359,6 +395,20 @@ fn get_border_view_style(app: &App, view: &View) -> Style {
     if let Some(selected_view) = app.get_selected_view() {
         if *selected_view == *view {
             style = style.fg(ROON_BRAND_COLOR);
+        }
+    }
+
+    style
+}
+
+fn get_gauge_view_style(app: &App, view: &View) -> Style {
+    let mut style = Style::default().bg(Color::Rgb(0x30, 0x30, 0x30));
+
+    if let Some(selected_view) = app.get_selected_view() {
+        if *selected_view == *view {
+            style = style.fg(ROON_BRAND_COLOR);
+        } else {
+            style = style.fg(Color::Rgb(0x80, 0x80, 0x80));
         }
     }
 

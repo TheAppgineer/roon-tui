@@ -28,7 +28,6 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
     info.set_log_level(LogLevel::None);
 
     let mut roon = RoonApi::new(info);
-    let mut settings = serde_json::from_value::<Settings>(RoonApi::load_config("settings")).unwrap_or_default();
     let services = vec![
         Services::Browse(Browse::new()),
         Services::Transport(Transport::new()),
@@ -38,6 +37,7 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
 
     tokio::spawn(async move {
         const QUEUE_ITEM_COUNT: u32 = 100;
+        let mut settings = serde_json::from_value::<Settings>(RoonApi::load_config("settings")).unwrap_or_default();
         let mut browse = None;
         let mut transport = None;
         let mut opts: BrowseOpts = BrowseOpts::default();
@@ -92,8 +92,8 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
 
                                 to_app.send(IoEvent::Zones(zones)).await.unwrap();
 
-                                if let Some(selected_zone_id) = settings.zone_id.as_ref() {
-                                    if let Some(zone) = zone_map.get(selected_zone_id) {
+                                if let Some(zone_id) = settings.zone_id.as_ref() {
+                                    if let Some(zone) = zone_map.get(zone_id) {
                                         to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
                                     }
                                 }
@@ -107,6 +107,15 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
 
                                 for zone_id in zone_ids {
                                     zone_map.remove(&zone_id);
+                                }
+                            }
+                            Parsed::ZonesSeek(seeks) => {
+                                if let Some(zone_id) = settings.zone_id.as_ref() {
+                                    if let Some(index) = seeks.iter().position(|seek| seek.zone_id == *zone_id) {
+                                        let seek = seeks[index].to_owned();
+
+                                        to_app.send(IoEvent::ZoneSeek(seek)).await.unwrap();
+                                    }
                                 }
                             }
                             _ => {
@@ -154,9 +163,9 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                         }
                         IoEvent::QueueSelected(queue_item_id) => {
                             if let Some(transport) = transport.as_ref() {
-                                let zone_id = opts.zone_or_output_id.as_ref().unwrap();
-
-                                transport.play_from_here(zone_id, queue_item_id).await;
+                                if let Some(zone_id) = settings.zone_id.as_ref() {
+                                    transport.play_from_here(zone_id, queue_item_id).await;
+                                }
                             }
                         }
                         IoEvent::ZoneSelected(zone_id) => {

@@ -1,5 +1,5 @@
 use crossterm::event::KeyEvent;
-use rust_roon_api::{browse, transport::{QueueItem, QueueChange, Zone}};
+use rust_roon_api::{browse, transport::{QueueItem, QueueChange, Zone, ZoneSeek}};
 
 pub mod events;
 pub mod roon;
@@ -23,4 +23,5 @@ pub enum IoEvent {
     ZoneSelected(String),
     ZoneChanged(Zone),
     ZoneRemoved(String),
+    ZoneSeek(ZoneSeek),
 }

@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use rust_roon_api::{browse, transport::{QueueItem, QueueOperation, QueueChange, Zone}};
+use rust_roon_api::{browse, transport::{QueueItem, QueueOperation, QueueChange, Zone, ZoneSeek}};
 use tokio::sync::mpsc;
 
 use crate::io::IoEvent;
@@ -32,6 +32,7 @@ pub struct App {
     pending_item_key: Option<String>,
     zones: StatefulList<(String, String)>,
     selected_zone: Option<Zone>,
+    zone_seek: Option<ZoneSeek>,
     queue: StatefulList<QueueItem>,
 }
 
@@ -47,6 +48,7 @@ impl App {
             pending_item_key: None,
             zones: StatefulList::new(),
             selected_zone: None,
+            zone_seek: None,
             queue: StatefulList::new(),
         }
     }
@@ -109,6 +111,7 @@ impl App {
                     }
                 }
                 IoEvent::ZoneRemoved(_) => self.selected_zone = None,
+                IoEvent::ZoneSeek(seek) => self.zone_seek = Some(seek),
                 _ => ()
             }
         }
