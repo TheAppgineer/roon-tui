@@ -12,7 +12,7 @@ use rust_roon_api::{
     RoonApi,
     Services,
     Svc,
-    transport::Transport,
+    transport::{Control, Transport, volume, Zone},
 };
 
 use super::IoEvent;
@@ -183,7 +183,16 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
 
                                 RoonApi::save_config("settings", settings.to_owned()).unwrap();
                             }
-                        },
+                        }
+                        IoEvent::Mute(how) => {
+                            mute(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), &how).await;
+                        }
+                        IoEvent::ChangeVolume(steps) => {
+                            change_volume(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), steps).await;
+                        }
+                        IoEvent::Control(how) => {
+                            control(transport.as_ref(), settings.zone_id.as_deref(), &how).await;
+                        }
                         _ => (),
                     }
                 }
@@ -250,4 +259,47 @@ async fn handle_parsed_response(
             _ => (),
         }
     }
+}
+
+async fn mute(
+    transport: Option<&Transport>,
+    zone_map: &HashMap<String, Zone>,
+    zone_id: Option<&str>,
+    how: &volume::Mute,
+) -> Option<Vec<usize>> {
+    let zone = zone_map.get(zone_id?)?;
+    let mut req_ids = Vec::new();
+
+    for output in &zone.outputs {
+        req_ids.push(transport?.mute(&output.output_id, how).await?);
+    }
+
+    Some(req_ids)
+}
+
+async fn change_volume(
+    transport: Option<&Transport>,
+    zone_map: &HashMap<String, Zone>,
+    zone_id: Option<&str>,
+    steps: i32
+) -> Option<Vec<usize>> {
+    let zone = zone_map.get(zone_id?)?;
+    let mut req_ids = Vec::new();
+
+    for output in &zone.outputs {
+        req_ids.push(transport?.change_volume(
+            &output.output_id,
+            &volume::ChangeMode::RelativeStep, steps
+        ).await?);
+    }
+
+    Some(req_ids)
+}
+
+async fn control(
+    transport: Option<&Transport>,
+    zone_id: Option<&str>,
+    how: &Control,
+) -> Option<usize> {
+    transport?.control(zone_id?, how).await
 }

@@ -1,5 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use rust_roon_api::{browse, transport::{QueueItem, QueueOperation, QueueChange, Zone, ZoneSeek}};
+use rust_roon_api::{
+    browse,
+    transport::{Control, QueueItem, QueueOperation, QueueChange, Zone, ZoneSeek, volume}
+};
 use tokio::sync::mpsc;
 
 use crate::io::IoEvent;
@@ -145,41 +148,48 @@ impl App {
     fn select_view(&mut self, view: Option<View>) {
         self.prev_view = self.selected_view.take();
 
-        if let Some(view) = &view {
-            match view {
-                View::Browse => {
-                    self.browse.select(None);
-                    self.queue.deselect();
-                    self.zones.deselect();
-                }
-                View::Queue => {
-                    self.browse.deselect();
-                    self.queue.select(None);
-                    self.zones.deselect();
-                }
-                View::Zones => {
-                    let index = if let Some(zone) = &self.selected_zone {
-                        if let Some(items) = self.zones.items.as_ref() {
-                            items
-                                .iter()
-                                .position(|(zone_id, _)| *zone_id == *zone.zone_id)
+        match &view {
+            Some(view) => {
+                match view {
+                    View::Browse => {
+                        self.browse.select(None);
+                        self.queue.deselect();
+                        self.zones.deselect();
+                    }
+                    View::Queue => {
+                        self.browse.deselect();
+                        self.queue.select(None);
+                        self.zones.deselect();
+                    }
+                    View::Zones => {
+                        let index = if let Some(zone) = &self.selected_zone {
+                            if let Some(items) = self.zones.items.as_ref() {
+                                items
+                                    .iter()
+                                    .position(|(zone_id, _)| *zone_id == *zone.zone_id)
+                            } else {
+                                None
+                            }
                         } else {
                             None
-                        }
-                    } else {
-                        None
-                    };
-
-                    self.zones.select(index);
-                    self.queue.deselect();
-                    self.browse.deselect();
-                }
-                _  => {
-                    self.browse.deselect();
-                    self.queue.deselect();
-                    self.zones.deselect();
-                }
-            };
+                        };
+    
+                        self.zones.select(index);
+                        self.queue.deselect();
+                        self.browse.deselect();
+                    }
+                    _  => {
+                        self.browse.deselect();
+                        self.queue.deselect();
+                        self.zones.deselect();
+                    }
+                };
+            }
+            None => {
+                self.browse.deselect();
+                self.queue.deselect();
+                self.zones.deselect();
+            }
         }
 
         self.selected_view = view;
@@ -189,7 +199,7 @@ impl App {
         let view_order = vec![View::Browse, View::Queue, View::NowPlaying];
         let next = match self.selected_view.as_ref() {
             Some(selected_view) => view_order.get(selected_view.to_owned() as usize + 1),
-            None => view_order.get(0),
+            None => return,
         };
         let next = next.cloned().unwrap_or(View::Browse);
 
@@ -207,26 +217,33 @@ impl App {
 
     async fn do_action(&mut self, key: KeyEvent) -> AppReturn {
         if key.kind == KeyEventKind::Press {
-            match key.code {
-                // Global key codes
-                KeyCode::Tab => self.select_next_view(),
-                KeyCode::Char('z') => {
-                    if key.modifiers == KeyModifiers::CONTROL {
-                        self.select_view(Some(View::Zones));
-                    }
-                }
-                KeyCode::Char('q') => return AppReturn::Exit,
-                _ => {
-                    // Key codes specific to the active view
-                    if let Some(view) = self.selected_view.as_ref() {
-                        match *view {
-                            View::Browse => self.handle_browse_key_codes(key).await,
-                            View::Queue => self.handle_queue_key_codes(key).await,
-                            View::Zones => self.handle_zone_key_codes(key).await,
-                            _ => (),
+            match key.modifiers {
+                KeyModifiers::NONE => {
+                    match key.code {
+                        // Global key codes
+                        KeyCode::Tab => self.select_next_view(),
+                        _ => {
+                            // Key codes specific to the active view
+                            if let Some(view) = self.selected_view.as_ref() {
+                                match *view {
+                                    View::Browse => self.handle_browse_key_codes(key).await,
+                                    View::NowPlaying => self.handle_now_playing_key_codes(key).await,
+                                    View::Queue => self.handle_queue_key_codes(key).await,
+                                    View::Zones => self.handle_zone_key_codes(key).await,
+                                }
+                            }
                         }
                     }
                 }
+                KeyModifiers::CONTROL => {
+                    match key.code {
+                        KeyCode::Char('p') => self.to_roon.send(IoEvent::Control(Control::PlayPause)).await.unwrap(),
+                        KeyCode::Char('z') => self.select_view(Some(View::Zones)),
+                        KeyCode::Char('c') => return AppReturn::Exit,
+                        _ => (),
+                    }
+                }
+                _ => (),
             }
         }
 
@@ -252,6 +269,16 @@ impl App {
             KeyCode::PageUp => self.browse.select_prev_page(),
             KeyCode::PageDown => self.browse.select_next_page(),
             KeyCode::F(5) => self.to_roon.send(IoEvent::BrowseRefresh).await.unwrap(),
+            _ => (),
+        }
+    }
+
+    async fn handle_now_playing_key_codes(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('m') => self.to_roon.send(IoEvent::Mute(volume::Mute::Mute)).await.unwrap(),
+            KeyCode::Char('u') => self.to_roon.send(IoEvent::Mute(volume::Mute::Unmute)).await.unwrap(),
+            KeyCode::Char('+') => self.to_roon.send(IoEvent::ChangeVolume(1)).await.unwrap(),
+            KeyCode::Char('-') => self.to_roon.send(IoEvent::ChangeVolume(-1)).await.unwrap(),
             _ => (),
         }
     }

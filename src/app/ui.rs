@@ -6,23 +6,13 @@ use ratatui::{
     text::{Span, Line},
     widgets::{block::{self, Block, Title}, BorderType, Borders, Clear, Gauge, List, ListItem, Padding, Paragraph},
 };
-use rust_roon_api::transport::State;
+use rust_roon_api::transport::{State, Zone, Repeat, volume::Scale};
 
 use crate::app::{App, View};
 
 const ROON_BRAND_COLOR: Color = Color::Rgb(0x75, 0x75, 0xf3);
-
-const _LOAD: char = '\u{23f3}';
-const PLAY: &str = " \u{23f5} ";
-const _PAUSE: char = '\u{23f8}';
-const _STOP: char = '\u{23f9}';
-const _RELOAD: char = '\u{27f3}';
-const _SHUFFLE: char = '\u{1f500}';
-const _REPEAT: char = '\u{1f501}';
-const _REPEAT_ONCE: char = '\u{1f502}';
-const _SPEAKER: char = '\u{1f508}';
-const _SPEAKER_ONE_WAVE: char = '\u{1f509}';
-const _SPEAKER_THREE_WAVE: char = '\u{1f50a}';
+const CUSTOM_GRAY: Color = Color::Rgb(0x80, 0x80, 0x80);
+const HIGHLIGHT_SYMBOL: &str = " \u{23f5} ";
 
 pub fn draw<B>(frame: &mut Frame<B>, app: &mut App)
 where
@@ -31,16 +21,17 @@ where
     let size = frame.size();
 
     // Surrounding block
-    let title = if let Some(name) = app.core_name.as_ref() {
-        format!("[ Roon TUI - {} ]", name)
+    let subtitle = if let Some(name) = app.core_name.as_ref() {
+        format!(" {} ", name)
     } else {
-        "[ Roon TUI - No core found]".to_owned()
+        app.select_view(None);
+        " No core paired/found ".to_owned()
     };
-    let color = if app.get_selected_view().is_none() {ROON_BRAND_COLOR} else {Color::Reset};
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(color))
-        .title(Span::styled(title, Style::default().fg(color)))
+        .border_style(get_border_view_style(&app, None))
+        .title(Span::styled(" Roon TUI ", get_text_view_style(&app, None)))
+        .title(Span::styled(subtitle, get_text_view_style(&app, None)))
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Plain);
     frame.render_widget(block, size);
@@ -73,7 +64,7 @@ where
 {
     let browse_title = format!("{}", app.browse.title.as_deref().unwrap_or("Browse"));
     let page_lines = if area.height > 2 {area.height - 2} else {0} as usize;  // Exclude border
-    let view = &View::Browse;
+    let view = Some(&View::Browse);
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(get_border_view_style(&app, view))
@@ -85,6 +76,11 @@ where
     app.browse.prepare_paging(page_lines, |item| if item.subtitle.is_none() {1} else {2});
 
     if let Some(browse_items) = &app.browse.items {
+        let secondary_style = if app.get_selected_view().is_some() {
+            Style::default().add_modifier(Modifier::ITALIC)
+        } else {
+            Style::default().fg(CUSTOM_GRAY).add_modifier(Modifier::ITALIC)
+        };
         let items: Vec<ListItem> = browse_items
             .iter()
             .map(|item| {
@@ -96,7 +92,7 @@ where
                 if let Some(subtitle) = subtitle {
                     lines.push(Line::from(Span::styled(
                         format!("  {}", subtitle),
-                        Style::default().add_modifier(Modifier::ITALIC)
+                        secondary_style,
                     )));
                 }
 
@@ -121,7 +117,7 @@ where
                     .bg(ROON_BRAND_COLOR)
                     .add_modifier(Modifier::BOLD)
             )
-            .highlight_symbol(PLAY);
+            .highlight_symbol(HIGHLIGHT_SYMBOL);
 
         // We can now render the item list
         frame.render_stateful_widget(list, area, &mut app.browse.state);
@@ -153,7 +149,7 @@ where
     B: Backend,
 {
     let page_lines = if area.height > 2 {area.height - 2} else {0} as usize;  // Exclude border
-    let view = &View::Queue;
+    let view = Some(&View::Queue);
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(get_border_view_style(&app, view))
@@ -166,11 +162,16 @@ where
     app.queue.prepare_paging(page_lines, |item| if item.two_line.line2.is_empty() {1} else {2});
 
     if let Some(queue_items) = &app.queue.items {
-        let item_len = (area.width - 5) as usize;
+        let item_len = if area.width > 5 {area.width - 5} else {0} as usize;
+        let secondary_style = if app.get_selected_view().is_some() {
+            Style::default().add_modifier(Modifier::ITALIC)
+        } else {
+            Style::default().fg(CUSTOM_GRAY).add_modifier(Modifier::ITALIC)
+        };
         let items: Vec<ListItem> = queue_items
             .iter()
             .map(|item| {
-                let duration = format!(" {}:{:02} ", item.length / 60, item.length % 60);
+                let duration = get_time_string(item.length);
                 let max_len = item_len - duration.len();
                 let line_len = item.two_line.line1.len();
                 let trim_len = if line_len < max_len {line_len} else {max_len};
@@ -185,7 +186,7 @@ where
                 if !item.two_line.line2.is_empty() {
                     lines.push(Line::from(Span::styled(
                         format!("  {}", item.two_line.line2),
-                        Style::default().add_modifier(Modifier::ITALIC)
+                        secondary_style,
                     )));
                 }
 
@@ -210,7 +211,7 @@ where
                     .bg(ROON_BRAND_COLOR)
                     .add_modifier(Modifier::BOLD)
             )
-            .highlight_symbol(PLAY);
+            .highlight_symbol(HIGHLIGHT_SYMBOL);
 
         // We can now render the item list
         frame.render_stateful_widget(list, area, &mut app.queue.state);
@@ -241,7 +242,7 @@ fn draw_now_playing_view<B>(frame: &mut Frame<B>, area: Rect, app: &App)
 where
     B: Backend,
 {
-    let view = &View::NowPlaying;
+    let view = Some(&View::NowPlaying);
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(get_border_view_style(app, view))
@@ -258,11 +259,21 @@ where
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(3), Constraint::Length(2)].as_ref())
             .split(area);
+        let hor_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(20), Constraint::Length(14)].as_ref())
+            .split(vert_chunks[0]);
+        let style = if app.get_selected_view().is_some() {
+            Style::default().fg(Color::Reset)
+        } else {
+            Style::default().fg(CUSTOM_GRAY)
+        };
 
         block = block.title(
-            Title::from(
-                Span::styled(zone.display_name.as_str(), get_text_view_style(app, view))
-            ).alignment(Alignment::Right)
+            Title::from(Span::styled(
+                zone.display_name.as_str(),
+                get_text_view_style(app, view),
+            )).alignment(Alignment::Right)
         );
 
         if let Some(now_playing) = zone.now_playing.as_ref() {
@@ -276,21 +287,24 @@ where
             let lines = vec![
                 Line::from(Span::styled(
                     &now_playing.three_line.line1,
-                    Style::default().add_modifier(Modifier::BOLD)
+                    style.add_modifier(Modifier::BOLD),
                 )),
-                Line::from(now_playing.three_line.line2.as_str()),
+                Line::from(Span::styled(
+                    &now_playing.three_line.line2,
+                    style,
+                )),
                 Line::from(Span::styled(
                     &now_playing.three_line.line3,
-                    Style::default().add_modifier(Modifier::ITALIC)
+                    style.add_modifier(Modifier::ITALIC),
                 )),
             ];
             let text = Paragraph::new(lines)
                 .block(metadata_block);
 
-            frame.render_widget(text, vert_chunks[0]);
+            frame.render_widget(text, hor_chunks[0]);
 
             let duration = now_playing.length.unwrap_or_default();
-            draw_progress_gauge(frame, vert_chunks[1], app, duration);
+            draw_progress_gauge(frame, vert_chunks[1], app, view, duration);
 
             let play_state_title = match zone.state {
                 State::Loading => "Loading",
@@ -304,22 +318,45 @@ where
                 get_text_view_style(app, view),
             ));
         }
+
+        let status_block = Block::default()
+        .padding(Padding {
+            left: 1,
+            right: 2,
+            top: 1,
+            bottom: 0,
+        });
+        let text = Paragraph::new(get_status_lines(zone, style))
+            .block(status_block).alignment(Alignment::Right);
+
+        frame.render_widget(text, hor_chunks[1]);
     }
 
     frame.render_widget(block, area);
 }
 
-fn draw_progress_gauge<B>(frame: &mut Frame<B>, area: Rect, app: &App, duration: u32) -> Option<()>
+fn draw_progress_gauge<B>(
+    frame: &mut Frame<B>,
+    area: Rect,
+    app: &App,
+    view: Option<&View>,
+    duration: u32
+) -> Option<()>
 where
     B: Backend,
 {
     let elapsed = app.zone_seek.as_ref()?.seek_position? as u32;
     let progress = if duration > 0 {elapsed * 100 / duration} else {0};
-    let elapsed = format!("{}:{:02}", elapsed / 60, elapsed % 60);
+    let elapsed = get_time_string(elapsed);
     let label = if duration > 0 {
-        format!("{} / {}:{:02}", elapsed, duration / 60, duration % 60)
+        format!("{} / {}", elapsed, get_time_string(duration))
     } else {
         elapsed
+    };
+    let style = if app.get_selected_view().is_some() {
+        Style::default().fg(Color::Reset)
+    } else {
+        Style::default().fg(CUSTOM_GRAY)
     };
     let gauge = Gauge::default()
         .block(Block::default().padding(Padding {
@@ -328,20 +365,70 @@ where
             top: 0,
             bottom: 1,
         }))
-        .gauge_style(get_gauge_view_style(app, &View::NowPlaying))
+        .gauge_style(get_gauge_view_style(app, view))
         .percent(progress as u16)
-        .label(Span::styled(label, Style::default().fg(Color::Reset).add_modifier(Modifier::BOLD)));
+        .label(Span::styled(label, style.add_modifier(Modifier::BOLD)));
 
     frame.render_widget(gauge, area);
 
     Some(())
 }
 
+fn get_time_string(seconds: u32) -> String {
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let seconds = seconds % 60;
+
+    if hours > 0 {
+        format!("{}:{:02}:{:02}", hours, minutes, seconds)
+    } else {
+        format!("{}:{:02}", minutes, seconds)
+    }
+}
+
+fn get_status_lines(zone: &Zone, style: Style) -> Vec<Line> {
+    let volume = if let Some(output) = zone.outputs.get(0) {
+        if let Some(volume) = output.volume.as_ref() {
+            if volume.is_muted {
+                "Vol   Muted".to_owned()
+            } else {
+                match volume.scale {
+                    Scale::Decibel => format!("Vol {:4} dB", volume.value),
+                    _ => format!("Vol {:7}", volume.value),
+                }
+            }
+        } else {
+            "Vol   Fixed".to_owned()
+        }
+    } else {
+        String::new()
+    };
+    let settings = &zone.settings;
+    let repeat_icon = match settings.repeat {
+        Repeat::All => "Repeat  All",
+        Repeat::One => "Repeat  One",
+        _ => "Repeat  Off",
+    };
+
+    vec![
+        Line::from(Span::styled(volume, style)),
+        Line::from(Span::styled(format!("{}", repeat_icon), style)),
+        Line::from(Span::styled(
+            format!("{}", if settings.shuffle {"Shuffle  On"} else {"Shuffle Off"}),
+            style
+        )),
+        Line::from(Span::styled(
+            format!("{}", if settings.auto_radio {"Radio    On"} else {"Radio   Off"}),
+            style
+        )),
+    ]
+}
+
 fn draw_zones_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
 where
     B: Backend,
 {
-    let view = &View::Zones;
+    let view = Some(&View::Zones);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(get_border_view_style(&app, view))
@@ -380,7 +467,7 @@ where
                     .bg(ROON_BRAND_COLOR)
                     .add_modifier(Modifier::BOLD)
             )
-            .highlight_symbol(PLAY);
+            .highlight_symbol(HIGHLIGHT_SYMBOL);
 
         // We can now render the item list
         frame.render_stateful_widget(list, area, &mut app.zones.state);
@@ -389,39 +476,55 @@ where
     frame.render_widget(block, area);
 }
 
-fn get_border_view_style(app: &App, view: &View) -> Style {
+fn get_border_view_style(app: &App, view: Option<&View>) -> Style {
     let mut style = Style::default();
 
     if let Some(selected_view) = app.get_selected_view() {
-        if *selected_view == *view {
-            style = style.fg(ROON_BRAND_COLOR);
+        if let Some(view) = view {
+            if *selected_view == *view {
+                style = style.fg(ROON_BRAND_COLOR);
+            }
         }
+    } else if view.is_none() {
+        style = style.fg(ROON_BRAND_COLOR);
+    } else {
+        style = style.fg(CUSTOM_GRAY);
     }
 
     style
 }
 
-fn get_gauge_view_style(app: &App, view: &View) -> Style {
+fn get_text_view_style(app: &App, view: Option<&View>) -> Style {
+    let mut style = Style::default();
+
+    if let Some(selected_view) = app.get_selected_view() {
+        if let Some(view) = view {
+            if *selected_view == *view {
+                style = style.fg(Color::Reset).add_modifier(Modifier::BOLD);
+            }
+        }
+    } else if view.is_none() {
+        style = style.fg(Color::Reset).add_modifier(Modifier::BOLD);
+    } else {
+        style = style.fg(CUSTOM_GRAY);
+    }
+
+    style
+}
+
+fn get_gauge_view_style(app: &App, view: Option<&View>) -> Style {
     let mut style = Style::default().bg(Color::Rgb(0x30, 0x30, 0x30));
 
     if let Some(selected_view) = app.get_selected_view() {
-        if *selected_view == *view {
-            style = style.fg(ROON_BRAND_COLOR);
-        } else {
-            style = style.fg(Color::Rgb(0x80, 0x80, 0x80));
+        if let Some(view) = view {
+            if *selected_view == *view {
+                style = style.fg(ROON_BRAND_COLOR);
+            } else {
+                style = style.fg(CUSTOM_GRAY);
+            }
         }
-    }
-
-    style
-}
-
-fn get_text_view_style(app: &App, view: &View) -> Style {
-    let mut style = Style::default();
-
-    if let Some(selected_view) = app.get_selected_view() {
-        if *selected_view == *view {
-            style = style.fg(Color::Reset).add_modifier(Modifier::BOLD);
-        }
+    } else if view.is_some() {
+        style = style.fg(Color::Rgb(0x30, 0x30, 0x30));
     }
 
     style
