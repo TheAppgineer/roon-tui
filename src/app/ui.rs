@@ -6,7 +6,7 @@ use ratatui::{
     text::{Span, Line},
     widgets::{block::{self, Block, Title}, BorderType, Borders, Clear, Gauge, List, ListItem, Padding, Paragraph},
 };
-use rust_roon_api::transport::{State, Zone, Repeat, volume::Scale};
+use roon_api::transport::{State, Zone, Repeat, volume::Scale};
 
 use crate::app::{App, View};
 
@@ -21,6 +21,7 @@ where
     let size = frame.size();
 
     // Surrounding block
+    let title = format!(" Roon TUI v{} ", env!("CARGO_PKG_VERSION"));
     let subtitle = if let Some(name) = app.core_name.as_ref() {
         format!(" {} ", name)
     } else {
@@ -30,7 +31,7 @@ where
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(get_border_view_style(&app, None))
-        .title(Span::styled(" Roon TUI ", get_text_view_style(&app, None)))
+        .title(Span::styled(title, get_text_view_style(&app, None)))
         .title(Span::styled(subtitle, get_text_view_style(&app, None)))
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Plain);
@@ -53,7 +54,11 @@ where
     draw_queue_view(frame, top_chunks[1], app);
     draw_now_playing_view(frame, chunks[1], &app);
 
-    if let Some(View::Zones) = &app.selected_view {
+    if let Some(View::Prompt) = app.selected_view {
+        draw_prompt_view(frame, top_chunks[0], app);
+    }
+
+    if let Some(View::Zones) = app.selected_view {
         draw_zones_view(frame, top_chunks[1], app);
     }
 }
@@ -424,6 +429,45 @@ fn get_status_lines(zone: &Zone, style: Style) -> Vec<Line> {
     ]
 }
 
+fn draw_prompt_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
+where
+    B: Backend,
+{
+    let view = Some(&View::Prompt);
+    let area = upper_bar(area);
+    let max_len = area.width.saturating_sub(3) as usize;
+    app.set_max_input_len(max_len);
+
+    let prompt = app.prompt.as_str();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(get_border_view_style(&app, view))
+        .title(Span::styled(
+            prompt,
+            get_text_view_style(&app, view),
+        ))
+        .title_alignment(Alignment::Left);
+
+    frame.render_widget(Clear, area);   // This clears out the background
+
+    let input = Line::from(Span::styled(app.input.as_str(), Style::default().fg(Color::Reset)));
+    let input = Paragraph::new(input)
+        .style(Style::default().fg(ROON_BRAND_COLOR))
+        .block(block);
+
+    frame.render_widget(input, area);
+
+    // Make the cursor visible and ask ratatui to put it at the specified coordinates after
+    // rendering
+    frame.set_cursor(
+        // Draw the cursor at the current position in the input field.
+        // This position is can be controlled via the left and right arrow key
+        area.x + app.cursor_position.clamp(0, max_len) as u16 + 1,
+        // Move one line down, from the border to the input line
+        area.y + 1,
+    );
+}
+
 fn draw_zones_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
 where
     B: Backend,
@@ -528,6 +572,19 @@ fn get_gauge_view_style(app: &App, view: Option<&View>) -> Style {
     }
 
     style
+}
+
+fn upper_bar(rect: Rect) -> Rect {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Length(3),
+                Constraint::Min(3),
+            ]
+            .as_ref(),
+        )
+        .split(rect)[0]
 }
 
 fn bottom_right_rect(percent_x: u16, percent_y: u16, rect: Rect) -> Rect {

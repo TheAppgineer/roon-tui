@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use rust_roon_api::{
+use roon_api::{
     browse,
     transport::{Control, QueueItem, QueueOperation, QueueChange, Zone, ZoneSeek, volume}
 };
@@ -22,7 +22,8 @@ pub enum View {
     Browse = 0,
     Queue = 1,
     NowPlaying = 2,
-    Zones = 3,
+    Prompt = 3,
+    Zones = 4,
 }
 
 pub struct App {
@@ -33,6 +34,10 @@ pub struct App {
     prev_view: Option<View>,
     browse: StatefulList<browse::Item>,
     pending_item_key: Option<String>,
+    prompt: String,
+    input: String,
+    cursor_position: usize,
+    max_input_len: usize,
     zones: StatefulList<(String, String)>,
     selected_zone: Option<Zone>,
     zone_seek: Option<ZoneSeek>,
@@ -49,6 +54,10 @@ impl App {
             prev_view: None,
             browse: StatefulList::new(),
             pending_item_key: None,
+            prompt: String::new(),
+            input: String::new(),
+            cursor_position: 0,
+            max_input_len: 0,
             zones: StatefulList::new(),
             selected_zone: None,
             zone_seek: None,
@@ -215,6 +224,65 @@ impl App {
         self.selected_view.as_ref()
     }
 
+    fn set_max_input_len(&mut self, max_input_len: usize) {
+        self.max_input_len = max_input_len;
+    }
+
+    fn move_cursor_left(&mut self) {
+        let cursor_moved_left = self.cursor_position.saturating_sub(1);
+        self.cursor_position = self.clamp_cursor(cursor_moved_left);
+    }
+
+    fn move_cursor_right(&mut self) {
+        let cursor_moved_right = self.cursor_position.saturating_add(1);
+        self.cursor_position = self.clamp_cursor(cursor_moved_right);
+    }
+
+    fn move_cursor_home(&mut self) {
+        self.cursor_position = 0;
+    }
+
+    fn move_cursor_end(&mut self) {
+        self.cursor_position = self.input.len();
+    }
+
+    fn enter_char(&mut self, new_char: char) {
+        if self.input.len() < self.max_input_len {
+            self.input.insert(self.cursor_position, new_char);
+            self.move_cursor_right();
+        }
+    }
+
+    fn delete_char(&mut self) {
+        let is_not_cursor_leftmost = self.cursor_position != 0;
+        if is_not_cursor_leftmost {
+            // Method "remove" is not used on the saved text for deleting the selected char.
+            // Reason: Using remove on String works on bytes instead of the chars.
+            // Using remove would require special care because of char boundaries.
+
+            let current_index = self.cursor_position;
+            let from_left_to_current_index = current_index - 1;
+
+            // Getting all characters before the selected character.
+            let before_char_to_delete = self.input.chars().take(from_left_to_current_index);
+            // Getting all characters after selected character.
+            let after_char_to_delete = self.input.chars().skip(current_index);
+
+            // Put all characters together except the selected one.
+            // By leaving the selected one out, it is forgotten and therefore deleted.
+            self.input = before_char_to_delete.chain(after_char_to_delete).collect();
+            self.move_cursor_left();
+        }
+    }
+
+    fn clamp_cursor(&self, new_cursor_pos: usize) -> usize {
+        new_cursor_pos.clamp(0, self.input.len())
+    }
+
+    fn reset_cursor(&mut self) {
+        self.cursor_position = 0;
+    }
+
     async fn do_action(&mut self, key: KeyEvent) -> AppReturn {
         if key.kind == KeyEventKind::Press {
             match key.modifiers {
@@ -229,6 +297,7 @@ impl App {
                                     View::Browse => self.handle_browse_key_codes(key).await,
                                     View::NowPlaying => self.handle_now_playing_key_codes(key).await,
                                     View::Queue => self.handle_queue_key_codes(key).await,
+                                    View::Prompt => self.handle_prompt_key_codes(key).await,
                                     View::Zones => self.handle_zone_key_codes(key).await,
                                 }
                             }
@@ -238,7 +307,13 @@ impl App {
                 KeyModifiers::CONTROL => {
                     match key.code {
                         KeyCode::Char('p') => self.to_roon.send(IoEvent::Control(Control::PlayPause)).await.unwrap(),
-                        KeyCode::Char('z') => self.select_view(Some(View::Zones)),
+                        KeyCode::Char('z') => {
+                            if let Some(View::Prompt) = self.selected_view {
+                                self.restore_view();
+                            }
+
+                            self.select_view(Some(View::Zones));
+                        },
                         KeyCode::Char('c') => return AppReturn::Exit,
                         _ => (),
                     }
@@ -255,7 +330,17 @@ impl App {
             KeyCode::Up => self.browse.prev(),
             KeyCode::Down => self.browse.next(),
             KeyCode::Enter => {
-                self.to_roon.send(IoEvent::BrowseSelected(self.get_item_key())).await.unwrap();
+                let item_key = self.get_item_key();
+
+                if let Some(item) = self.browse.get_selected_item() {
+                    if let Some(prompt) = item.input_prompt.as_ref() {
+                        self.prompt = prompt.prompt.to_owned();
+                        self.pending_item_key = item_key;
+                        self.select_view(Some(View::Prompt));
+                    } else {
+                        self.to_roon.send(IoEvent::BrowseSelected(item_key)).await.unwrap();
+                    }
+                }
             }
             KeyCode::Esc => self.to_roon.send(IoEvent::BrowseBack).await.unwrap(),
             KeyCode::Home => {
@@ -295,6 +380,38 @@ impl App {
                 if let Some(queue_item_id) = self.get_queue_item_id() {
                     self.to_roon.send(IoEvent::QueueSelected(queue_item_id)).await.unwrap();
                 }
+            }
+            _ => (),
+        }
+    }
+
+    async fn handle_prompt_key_codes(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Enter => {
+                if self.pending_item_key.is_some() {
+                    self.to_roon.send(IoEvent::BrowseInput(self.input.clone())).await.unwrap();
+                    self.to_roon.send(IoEvent::BrowseSelected(self.pending_item_key.take())).await.unwrap();
+                }
+
+                self.input.clear();
+                self.reset_cursor();
+                self.restore_view();
+            },
+            KeyCode::Char(to_insert) => self.enter_char(to_insert),
+            KeyCode::Backspace => self.delete_char(),
+            KeyCode::Delete => {
+                self.move_cursor_right();
+                self.delete_char();
+            }
+            KeyCode::Left => self.move_cursor_left(),
+            KeyCode::Right => self.move_cursor_right(),
+            KeyCode::Home => self.move_cursor_home(),
+            KeyCode::End => self.move_cursor_end(),
+            KeyCode::Esc => {
+                self.pending_item_key = None;
+                self.input.clear();
+                self.reset_cursor();
+                self.restore_view();
             }
             _ => (),
         }

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tokio::{sync::mpsc, select};
 
-use rust_roon_api::{
+use roon_api::{
     info,
     browse::{Action, Browse, BrowseOpts, LoadOpts},
     CoreEvent,
@@ -138,6 +138,8 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                                 opts.zone_or_output_id = settings.zone_id.to_owned();
 
                                 browse.browse(&opts).await;
+
+                                opts.input = None;
                             }
                         }
                         IoEvent::BrowseBack => {
@@ -157,6 +159,13 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                         IoEvent::BrowseHome => {
                             if let Some(browse) = browse.as_ref() {
                                 opts.pop_all = true;
+
+                                browse.browse(&opts).await;
+                            }
+                        }
+                        IoEvent::BrowseInput(input) => {
+                            if let Some(browse) = browse.as_ref() {
+                                opts.input = Some(input);
 
                                 browse.browse(&opts).await;
                             }
