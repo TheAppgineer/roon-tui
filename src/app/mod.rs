@@ -68,7 +68,6 @@ impl App {
     pub async fn update_on_event(&mut self) -> AppReturn {
         if let Some(io_event) = self.from_roon.recv().await {
             match io_event {
-                IoEvent::Tick => (),
                 IoEvent::Input(key) => {
                     return self.do_action(key).await;
                 }
