@@ -11,7 +11,7 @@ A Roon Remote for the terminal
 * The binary can be found in: `target/release/roon-tui`
 
 ## Downloading Release Binaries
-Downloadable binaries will be provided later via the release assets in GitHub. Binaries might have to be created by other users for platforms I don't have access to myself.
+Prebuilt binaries can be downloaded from the [latests release](https://github.com/TheAppgineer/roon-tui/releases/latest) page on GitHub. Binaries might have been created by other users for platforms I don't have access to myself.
 
 ## Project Status
 This is Alpha stage software. Instead of using the official [Node.js Roon API](https://github.com/RoonLabs/node-roon-api) provided by Roon Labs this project uses an own developed [Rust port](https://github.com/TheAppgineer/rust-roon-api) of the API.
