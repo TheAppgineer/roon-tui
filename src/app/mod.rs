@@ -284,20 +284,19 @@ impl App {
 
     async fn do_action(&mut self, key: KeyEvent) -> AppReturn {
         if key.kind == KeyEventKind::Press {
+            // Global key codes
             match key.modifiers {
                 KeyModifiers::NONE => {
                     match key.code {
-                        // Global key codes
                         KeyCode::Tab => self.select_next_view(),
                         _ => {
                             // Key codes specific to the active view
                             if let Some(view) = self.selected_view.as_ref() {
                                 match *view {
-                                    View::Browse => self.handle_browse_key_codes(key).await,
                                     View::NowPlaying => self.handle_now_playing_key_codes(key).await,
                                     View::Queue => self.handle_queue_key_codes(key).await,
-                                    View::Prompt => self.handle_prompt_key_codes(key).await,
                                     View::Zones => self.handle_zone_key_codes(key).await,
+                                    _ => (),
                                 }
                             }
                         }
@@ -312,12 +311,21 @@ impl App {
                             }
 
                             self.select_view(Some(View::Zones));
-                        },
+                        }
                         KeyCode::Char('c') => return AppReturn::Exit,
                         _ => (),
                     }
                 }
                 _ => (),
+            }
+
+            // Key codes specific to the active view (with own modifier handling)
+            if let Some(view) = self.selected_view.as_ref() {
+                match *view {
+                    View::Browse => self.handle_browse_key_codes(key).await,
+                    View::Prompt => self.handle_prompt_key_codes(key).await,
+                    _ => (),
+                }
             }
         }
 
@@ -325,34 +333,38 @@ impl App {
     }
 
     async fn handle_browse_key_codes(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Up => self.browse.prev(),
-            KeyCode::Down => self.browse.next(),
-            KeyCode::Enter => {
-                let item_key = self.get_item_key();
-
-                if let Some(item) = self.browse.get_selected_item() {
-                    if let Some(prompt) = item.input_prompt.as_ref() {
-                        self.prompt = prompt.prompt.to_owned();
-                        self.pending_item_key = item_key;
-                        self.select_view(Some(View::Prompt));
-                    } else {
-                        self.to_roon.send(IoEvent::BrowseSelected(item_key)).await.unwrap();
-                    }
+        match key.modifiers {
+            KeyModifiers::CONTROL => {
+                if key.code == KeyCode::Home {
+                    self.to_roon.send(IoEvent::BrowseHome).await.unwrap();
                 }
             }
-            KeyCode::Esc => self.to_roon.send(IoEvent::BrowseBack).await.unwrap(),
-            KeyCode::Home => {
-                match key.modifiers {
-                    KeyModifiers::NONE => self.browse.select_first(),
-                    KeyModifiers::CONTROL => self.to_roon.send(IoEvent::BrowseHome).await.unwrap(),
+            KeyModifiers::NONE => {
+                match key.code {
+                    KeyCode::Up => self.browse.prev(),
+                    KeyCode::Down => self.browse.next(),
+                    KeyCode::Enter => {
+                        let item_key = self.get_item_key();
+        
+                        if let Some(item) = self.browse.get_selected_item() {
+                            if let Some(prompt) = item.input_prompt.as_ref() {
+                                self.prompt = prompt.prompt.to_owned();
+                                self.pending_item_key = item_key;
+                                self.select_view(Some(View::Prompt));
+                            } else {
+                                self.to_roon.send(IoEvent::BrowseSelected(item_key)).await.unwrap();
+                            }
+                        }
+                    }
+                    KeyCode::Esc => self.to_roon.send(IoEvent::BrowseBack).await.unwrap(),
+                    KeyCode::Home => self.browse.select_first(),
+                    KeyCode::End => self.browse.select_last(),
+                    KeyCode::PageUp => self.browse.select_prev_page(),
+                    KeyCode::PageDown => self.browse.select_next_page(),
+                    KeyCode::F(5) => self.to_roon.send(IoEvent::BrowseRefresh).await.unwrap(),
                     _ => (),
                 }
             }
-            KeyCode::End => self.browse.select_last(),
-            KeyCode::PageUp => self.browse.select_prev_page(),
-            KeyCode::PageDown => self.browse.select_next_page(),
-            KeyCode::F(5) => self.to_roon.send(IoEvent::BrowseRefresh).await.unwrap(),
             _ => (),
         }
     }
@@ -385,32 +397,43 @@ impl App {
     }
 
     async fn handle_prompt_key_codes(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Enter => {
-                if self.pending_item_key.is_some() {
-                    self.to_roon.send(IoEvent::BrowseInput(self.input.clone())).await.unwrap();
-                    self.to_roon.send(IoEvent::BrowseSelected(self.pending_item_key.take())).await.unwrap();
+        match key.modifiers {
+            KeyModifiers::SHIFT => {
+                match key.code {
+                    KeyCode::Char(to_insert) => self.enter_char(to_insert),
+                    _ => (),
                 }
-
-                self.input.clear();
-                self.reset_cursor();
-                self.restore_view();
-            },
-            KeyCode::Char(to_insert) => self.enter_char(to_insert),
-            KeyCode::Backspace => self.delete_char(),
-            KeyCode::Delete => {
-                self.move_cursor_right();
-                self.delete_char();
             }
-            KeyCode::Left => self.move_cursor_left(),
-            KeyCode::Right => self.move_cursor_right(),
-            KeyCode::Home => self.move_cursor_home(),
-            KeyCode::End => self.move_cursor_end(),
-            KeyCode::Esc => {
-                self.pending_item_key = None;
-                self.input.clear();
-                self.reset_cursor();
-                self.restore_view();
+            KeyModifiers::NONE => {
+                match key.code {
+                    KeyCode::Enter => {
+                        if self.pending_item_key.is_some() {
+                            self.to_roon.send(IoEvent::BrowseInput(self.input.clone())).await.unwrap();
+                            self.to_roon.send(IoEvent::BrowseSelected(self.pending_item_key.take())).await.unwrap();
+                        }
+        
+                        self.input.clear();
+                        self.reset_cursor();
+                        self.restore_view();
+                    }
+                    KeyCode::Char(to_insert) => self.enter_char(to_insert),
+                    KeyCode::Backspace => self.delete_char(),
+                    KeyCode::Delete => {
+                        self.move_cursor_right();
+                        self.delete_char();
+                    }
+                    KeyCode::Left => self.move_cursor_left(),
+                    KeyCode::Right => self.move_cursor_right(),
+                    KeyCode::Home => self.move_cursor_home(),
+                    KeyCode::End => self.move_cursor_end(),
+                    KeyCode::Esc => {
+                        self.pending_item_key = None;
+                        self.input.clear();
+                        self.reset_cursor();
+                        self.restore_view();
+                    }
+                    _ => (),
+                }
             }
             _ => (),
         }
