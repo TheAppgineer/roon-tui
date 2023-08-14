@@ -124,6 +124,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossterm"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f476fe445d41c9e991fd07515a6f463074b782242ccf4a5b7b1d1012e70824df"
+dependencies = [
+ "bitflags 2.3.3",
+ "crossterm_winapi",
+ "libc",
+ "mio",
+ "parking_lot",
+ "signal-hook",
+ "signal-hook-mio",
+ "winapi",
+]
+
+[[package]]
 name = "crossterm_winapi"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -498,7 +514,7 @@ checksum = "8285baa38bdc9f879d92c0e37cb562ef38aa3aeefca22b3200186bc39242d3d5"
 dependencies = [
  "bitflags 2.3.3",
  "cassowary",
- "crossterm",
+ "crossterm 0.26.1",
  "indoc",
  "paste",
  "unicode-segmentation",
@@ -545,8 +561,8 @@ checksum = "e5ea92a5b6195c6ef2a0295ea818b312502c6fc94dde986c5553242e18fd4ce2"
 
 [[package]]
 name = "roon-api"
-version = "0.0.2"
-source = "git+https://github.com/TheAppgineer/rust-roon-api.git?tag=0.0.2#f3f96f477a807a04bc7d9b87fa99fd9a939b12ee"
+version = "0.0.3"
+source = "git+https://github.com/TheAppgineer/rust-roon-api.git?rev=dc85bc0#dc85bc01dfeb4f6bf9a72e990c9121f1423c1ea0"
 dependencies = [
  "futures-util",
  "if-addrs",
@@ -561,9 +577,9 @@ dependencies = [
 
 [[package]]
 name = "roon-tui"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
- "crossterm",
+ "crossterm 0.27.0",
  "eyre",
  "log",
  "ratatui",
