@@ -1,6 +1,5 @@
-use crossterm::event::{KeyEventKind, KeyModifiers, KeyCode};
+use crossterm::event::{self, KeyEventKind, KeyModifiers, KeyCode};
 use tokio::sync::mpsc;
-use log::error;
 
 use crate::io::IoEvent;
 
@@ -10,17 +9,19 @@ impl Events {
     pub fn start(to_app: mpsc::Sender<IoEvent>) {
         tokio::spawn(async move {
             loop {
-                if let crossterm::event::Event::Key(key) = crossterm::event::read().unwrap() {
-                    if let Err(err) = to_app.send(IoEvent::Input(key)).await {
-                        error!("Oops!, {}", err);
-                    }
+                match event::read().unwrap() {
+                    event::Event::Key(key) => {
+                        to_app.send(IoEvent::Input(key)).await.unwrap();
 
-                    if key.kind == KeyEventKind::Press
-                        && key.modifiers == KeyModifiers::CONTROL
-                        && key.code == KeyCode::Char('c')
-                    {
-                        break;
+                        if key.kind == KeyEventKind::Press
+                            && key.modifiers == KeyModifiers::CONTROL
+                            && key.code == KeyCode::Char('c')
+                        {
+                            break;
+                        }
                     }
+                    event::Event::Resize(_, _) => to_app.send(IoEvent::Redraw).await.unwrap(),
+                    _ => (),
                 }
             }
         });

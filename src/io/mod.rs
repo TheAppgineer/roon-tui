@@ -7,6 +7,7 @@ pub mod roon;
 #[derive(Debug)]
 pub enum IoEvent {
     Input(KeyEvent),
+    Redraw,
     CoreName(Option<String>),
     BrowseTitle(String),
     BrowseList(usize, Vec<browse::Item>),
