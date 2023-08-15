@@ -16,7 +16,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.24.1", features = ["macros", "rt-multi-thread"] }
 eyre = "0.6"
-roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", rev = "dc85bc0", features = ["browse", "transport"] }
+roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", tag = "0.0.3", features = ["browse", "transport"] }
 
 [profile.release]
 strip = true
