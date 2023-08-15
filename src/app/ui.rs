@@ -68,7 +68,7 @@ where
     B: Backend,
 {
     let browse_title = format!("{}", app.browse.title.as_deref().unwrap_or("Browse"));
-    let page_lines = if area.height > 2 {area.height - 2} else {0} as usize;  // Exclude border
+    let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
     let view = Some(&View::Browse);
     let mut block = Block::default()
         .borders(Borders::ALL)
@@ -136,7 +136,7 @@ where
                     app.browse.state.selected().unwrap() + 1,
                     len
                 );
-    
+
                 block = block.title(
                     Title::from(
                         Span::styled(progress, Style::default().fg(Color::Reset))
@@ -153,7 +153,7 @@ fn draw_queue_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
 where
     B: Backend,
 {
-    let page_lines = if area.height > 2 {area.height - 2} else {0} as usize;  // Exclude border
+    let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
     let view = Some(&View::Queue);
     let mut block = Block::default()
         .borders(Borders::ALL)
@@ -167,7 +167,7 @@ where
     app.queue.prepare_paging(page_lines, |item| if item.two_line.line2.is_empty() {1} else {2});
 
     if let Some(queue_items) = &app.queue.items {
-        let item_len = if area.width > 5 {area.width - 5} else {0} as usize;
+        let item_len = area.width.saturating_sub(6) as usize;
         let secondary_style = if app.get_selected_view().is_some() {
             Style::default().add_modifier(Modifier::ITALIC)
         } else {
@@ -177,13 +177,11 @@ where
             .iter()
             .map(|item| {
                 let duration = get_time_string(item.length);
-                let max_len = item_len - duration.len();
-                let line_len = item.two_line.line1.len();
-                let trim_len = if line_len < max_len {line_len} else {max_len};
-                let line1 = &item.two_line.line1[0..trim_len];
-                let pad_len = item_len - line1.len() - duration.len();
+                let max_len = item_len.saturating_sub(duration.len() + 1);
+                let (line1_len, line1) = trim_string(&item.two_line.line1, max_len);
+                let pad_len = item_len.saturating_sub(line1_len + duration.len());
                 let pad: String = (0..pad_len).map(|_| ' ').collect();
-                let line1 = format!("{}{}{} ", line1, pad, duration);
+                let line1 = format!("{}{}{}", line1, pad, duration);
                 let mut lines = vec![
                     Line::from(Span::styled(line1, get_text_view_style(&app, view))),
                 ];
@@ -230,7 +228,7 @@ where
                     app.queue.state.selected().unwrap() + 1,
                     len
                 );
-    
+
                 block = block.title(
                     Title::from(
                         Span::styled(progress, Style::default().fg(Color::Reset))
@@ -391,6 +389,15 @@ fn get_time_string(seconds: u32) -> String {
     }
 }
 
+fn trim_string(string: &str, trim_len: usize) -> (usize, &str) {
+    let trim = match string.char_indices().nth(trim_len) {
+        None => string,
+        Some((index, _)) => &string[..index],
+    };
+
+    (trim.chars().count(), trim)
+}
+
 fn get_status_lines(zone: &Zone, style: Style) -> Vec<Line> {
     let volume = if let Some(output) = zone.outputs.get(0) {
         if let Some(volume) = output.volume.as_ref() {
@@ -483,7 +490,7 @@ where
         .title_alignment(Alignment::Left);
 
     let area = bottom_right_rect(50, 50, area);
-    let page_lines = if area.height > 2 {area.height - 2} else {0} as usize;  // Exclude border
+    let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
 
     frame.render_widget(Clear, area);   // This clears out the background
 
