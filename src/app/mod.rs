@@ -181,7 +181,7 @@ impl App {
                         } else {
                             None
                         };
-    
+
                         self.zones.select(index);
                         self.queue.deselect();
                         self.browse.deselect();
@@ -282,6 +282,68 @@ impl App {
         self.cursor_position = 0;
     }
 
+    fn select_at_char(&mut self, key: char) {
+        if let Some(items) = self.browse.items.as_ref() {
+            let key = key.to_ascii_lowercase();
+            let split = if let Some(title) = self.browse.title.as_ref() {
+                title == "Artists" || title == "Composers"
+            } else {
+                false
+            };
+            let mut order: Vec<char> = ('['..='~').rev().collect();
+            order = [order, ('!'..='@').rev().collect()].concat();
+
+            let index = items
+                .iter()
+                .position(|item| {
+                    while let Some(pop) = order.last() {
+                        if item.title.chars().position(|c| !c.is_ascii()).is_some() {
+                            break;
+                        }
+
+                        let mut pop_matched = false;
+                        let mut matching = |sub: &str| {
+                            if let Some(first_char) = sub.chars().next().unwrap().to_lowercase().next() {
+                                if first_char == *pop {
+                                    if first_char == key {
+                                        return true;
+                                    } else {
+                                        pop_matched = true;
+                                    }
+                                }
+                            }
+
+                            false
+                        };
+                        let result = if split {
+                            item.title.split(' ')
+                                .position(matching)
+                                .is_some()
+                        } else {
+                            let title = item.title
+                                .to_ascii_lowercase()
+                                .replace("the ", "");
+                            matching(&title)
+                        };
+
+                        if result {
+                            return result;
+                        } else if key == *pop || pop_matched {
+                            break;
+                        }
+
+                        order.pop();
+                    }
+
+                    false
+                });
+
+            if index.is_some() {
+                self.browse.state.select(index);
+            }
+        }
+    }
+
     async fn do_action(&mut self, key: KeyEvent) -> AppReturn {
         if key.kind == KeyEventKind::Press {
             // Global key codes
@@ -339,13 +401,20 @@ impl App {
                     self.to_roon.send(IoEvent::BrowseHome).await.unwrap();
                 }
             }
+            KeyModifiers::SHIFT => {
+                match key.code {
+                    KeyCode::Char(key) => self.select_at_char(key),
+                    _ => (),
+                }
+            }
             KeyModifiers::NONE => {
                 match key.code {
+                    KeyCode::Char(key) => self.select_at_char(key),
                     KeyCode::Up => self.browse.prev(),
                     KeyCode::Down => self.browse.next(),
                     KeyCode::Enter => {
                         let item_key = self.get_item_key();
-        
+
                         if let Some(item) = self.browse.get_selected_item() {
                             if let Some(prompt) = item.input_prompt.as_ref() {
                                 self.prompt = prompt.prompt.to_owned();
@@ -411,7 +480,7 @@ impl App {
                             self.to_roon.send(IoEvent::BrowseInput(self.input.clone())).await.unwrap();
                             self.to_roon.send(IoEvent::BrowseSelected(self.pending_item_key.take())).await.unwrap();
                         }
-        
+
                         self.input.clear();
                         self.reset_cursor();
                         self.restore_view();
