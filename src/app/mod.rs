@@ -208,12 +208,27 @@ impl App {
     fn select_next_view(&mut self) {
         let view_order = vec![View::Browse, View::Queue, View::NowPlaying];
         let next = match self.selected_view.as_ref() {
-            Some(selected_view) => view_order.get(selected_view.to_owned() as usize + 1),
+            Some(selected_view) => {
+                view_order.get(selected_view.to_owned() as usize + 1)
+            }
             None => return,
         };
         let next = next.cloned().unwrap_or(View::Browse);
 
         self.select_view(Some(next));
+    }
+
+    fn select_prev_view(&mut self) {
+        let view_order = vec![View::Browse, View::Queue, View::NowPlaying];
+        let prev = match self.selected_view.as_ref() {
+            Some(selected_view) => {
+                view_order.get((selected_view.to_owned() as usize).wrapping_sub(1))
+            }
+            None => return,
+        };
+        let prev = prev.cloned().unwrap_or(View::NowPlaying);
+
+        self.select_view(Some(prev));
     }
 
     fn restore_view(&mut self) {
@@ -404,6 +419,16 @@ impl App {
                                 }
                             }
                         }
+                    }
+                }
+                KeyModifiers::SHIFT => {
+                    match key.code {
+                        KeyCode::BackTab => {
+                            self.input.clear();
+                            self.browse_match_list.clear();
+                            self.select_prev_view();
+                        }
+                        _ => (),
                     }
                 }
                 KeyModifiers::CONTROL => {

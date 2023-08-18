@@ -23,7 +23,8 @@ This is Alpha stage software. Instead of using the official [Node.js Roon API](h
 ### Global (useable in all views)
 |||
 |---|---|
-|Tab|Swith between views
+|Tab|Switch between views
+|Shift-Tab|Reverse switch between views
 |Ctrl-z|Open zone selector
 |Ctrl-p|Play / Pause
 |Ctrl-c|Quit
