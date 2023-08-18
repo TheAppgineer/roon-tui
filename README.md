@@ -43,6 +43,8 @@ This is Alpha stage software. Instead of using the official [Node.js Roon API](h
 |Esc|Move level up
 |Ctrl-Home|Move to top level
 |F5|Refresh
+|a...z|Multi-character jump to item
+|Backspace|Step back in multi-character jump
 ### Queue View
 |||
 |---|---|

@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Span, Line},
-    widgets::{block::{self, Block, Title}, BorderType, Borders, Clear, Gauge, List, ListItem, Padding, Paragraph},
+    widgets::{block::{self, Block, Position, Title}, BorderType, Borders, Clear, Gauge, List, ListItem, Padding, Paragraph},
 };
 use roon_api::transport::{State, Zone, Repeat, volume::Scale};
 
@@ -142,6 +142,14 @@ where
                         Span::styled(progress, Style::default().fg(Color::Reset))
                     ).alignment(Alignment::Right)
                 );
+
+                if !app.input.is_empty() {
+                    block = block.title(
+                        Title::from(
+                            Span::styled(app.input.as_str(), Style::default().fg(Color::Reset))
+                        ).position(Position::Bottom)
+                    );
+                }
             }
         }
     }

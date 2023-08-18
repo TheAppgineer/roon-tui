@@ -33,6 +33,7 @@ pub struct App {
     selected_view: Option<View>,
     prev_view: Option<View>,
     browse: StatefulList<browse::Item>,
+    browse_match_list: Vec<usize>,
     pending_item_key: Option<String>,
     prompt: String,
     input: String,
@@ -53,6 +54,7 @@ impl App {
             selected_view: None,
             prev_view: None,
             browse: StatefulList::new(),
+            browse_match_list: Vec::new(),
             pending_item_key: None,
             prompt: String::new(),
             input: String::new(),
@@ -282,9 +284,14 @@ impl App {
         self.cursor_position = 0;
     }
 
-    fn select_at_char(&mut self, key: char) {
+    fn select_by_input(&mut self, key: char) {
+        if !key.is_ascii() {
+            return;
+        }
+
         if let Some(items) = self.browse.items.as_ref() {
             let key = key.to_ascii_lowercase();
+            let input = format!("{}{}", self.input, key);
             let split = if let Some(title) = self.browse.title.as_ref() {
                 title == "Artists" || title == "Composers"
             } else {
@@ -293,52 +300,83 @@ impl App {
             let mut order: Vec<char> = ('['..='~').rev().collect();
             order = [order, ('!'..='@').rev().collect()].concat();
 
-            let index = items
-                .iter()
-                .position(|item| {
-                    while let Some(pop) = order.last() {
+            let index = if self.browse_match_list.is_empty() {
+                items
+                    .iter()
+                    .position(|item| {
                         if item.title.chars().position(|c| !c.is_ascii()).is_some() {
-                            break;
+                            return false;
                         }
 
-                        let mut pop_matched = false;
-                        let mut matching = |sub: &str| {
-                            if let Some(first_char) = sub.chars().next().unwrap().to_lowercase().next() {
-                                if first_char == *pop {
-                                    if first_char == key {
-                                        return true;
-                                    } else {
-                                        pop_matched = true;
+                        while let Some(pop) = order.last() {
+                            let mut pop_matched = false;
+                            let mut matching = |sub: &str| {
+                                if let Some(first_char) = sub.chars().next().unwrap().to_lowercase().next() {
+                                    if first_char == *pop {
+                                        if first_char == key {
+                                            return true;
+                                        } else {
+                                            pop_matched = true;
+                                        }
                                     }
                                 }
+
+                                false
+                            };
+                            let result = if split {
+                                item.title.split(' ')
+                                    .position(matching)
+                                    .is_some()
+                            } else {
+                                let title = item.title
+                                    .to_ascii_lowercase()
+                                    .replacen("the ", "", 1);
+                                matching(&title)
+                            };
+
+                            if result {
+                                return result;
+                            } else if key == *pop || pop_matched {
+                                break;
                             }
 
-                            false
-                        };
-                        let result = if split {
-                            item.title.split(' ')
-                                .position(matching)
-                                .is_some()
-                        } else {
-                            let title = item.title
-                                .to_ascii_lowercase()
-                                .replace("the ", "");
-                            matching(&title)
-                        };
-
-                        if result {
-                            return result;
-                        } else if key == *pop || pop_matched {
-                            break;
+                            order.pop();
                         }
 
-                        order.pop();
-                    }
+                        false
+                    })
+            } else {
+                let skip = *self.browse_match_list.last().unwrap();
+                let position = items
+                    .iter()
+                    .skip(skip)
+                    .position(|item| {
+                        if item.title.chars().position(|c| !c.is_ascii()).is_some() {
+                            return false;
+                        }
 
-                    false
-                });
+                        // Find an upcoming item with matching input
+                        let title = item.title
+                            .to_ascii_lowercase()
+                            .replacen("the ", "", 1);
+
+                        if split {
+                            title.contains(input.as_str())
+                        } else {
+                            title.starts_with(input.as_str())
+                        }
+                    });
+
+                if let Some(position) = position {
+                    Some(skip + position)
+                } else {
+                    None
+                }
+            };
 
             if index.is_some() {
+                self.input = input;
+                self.browse_match_list.push(index.unwrap());
                 self.browse.state.select(index);
             }
         }
@@ -350,7 +388,11 @@ impl App {
             match key.modifiers {
                 KeyModifiers::NONE => {
                     match key.code {
-                        KeyCode::Tab => self.select_next_view(),
+                        KeyCode::Tab => {
+                            self.input.clear();
+                            self.browse_match_list.clear();
+                            self.select_next_view();
+                        }
                         _ => {
                             // Key codes specific to the active view
                             if let Some(view) = self.selected_view.as_ref() {
@@ -403,16 +445,23 @@ impl App {
             }
             KeyModifiers::SHIFT => {
                 match key.code {
-                    KeyCode::Char(key) => self.select_at_char(key),
+                    KeyCode::Char(key) => self.select_by_input(key),
                     _ => (),
                 }
             }
             KeyModifiers::NONE => {
                 match key.code {
-                    KeyCode::Char(key) => self.select_at_char(key),
+                    KeyCode::Char(key) => self.select_by_input(key),
+                    KeyCode::Backspace => {
+                        self.input.pop();
+                        self.browse_match_list.pop();
+                        self.browse.select(self.browse_match_list.last().cloned());
+                    }
                     KeyCode::Up => self.browse.prev(),
                     KeyCode::Down => self.browse.next(),
                     KeyCode::Enter => {
+                        self.input.clear();
+                        self.browse_match_list.clear();
                         let item_key = self.get_item_key();
 
                         if let Some(item) = self.browse.get_selected_item() {
@@ -425,7 +474,11 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Esc => self.to_roon.send(IoEvent::BrowseBack).await.unwrap(),
+                    KeyCode::Esc => {
+                        self.input.clear();
+                        self.browse_match_list.clear();
+                        self.to_roon.send(IoEvent::BrowseBack).await.unwrap();
+                    }
                     KeyCode::Home => self.browse.select_first(),
                     KeyCode::End => self.browse.select_last(),
                     KeyCode::PageUp => self.browse.select_prev_page(),
