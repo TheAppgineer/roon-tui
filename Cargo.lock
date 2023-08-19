@@ -561,8 +561,8 @@ checksum = "e5ea92a5b6195c6ef2a0295ea818b312502c6fc94dde986c5553242e18fd4ce2"
 
 [[package]]
 name = "roon-api"
-version = "0.0.3"
-source = "git+https://github.com/TheAppgineer/rust-roon-api.git?tag=0.0.3#dc85bc01dfeb4f6bf9a72e990c9121f1423c1ea0"
+version = "0.0.4"
+source = "git+https://github.com/TheAppgineer/rust-roon-api.git?tag=0.0.4#921acf8a4ff6920a2e66a398e2d1fa656e5049d5"
 dependencies = [
  "futures-util",
  "if-addrs",
@@ -577,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "roon-tui"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "crossterm 0.27.0",
  "eyre",

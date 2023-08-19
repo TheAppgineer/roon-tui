@@ -33,6 +33,7 @@ pub struct App {
     selected_view: Option<View>,
     prev_view: Option<View>,
     browse: StatefulList<browse::Item>,
+    browse_match_list: Vec<usize>,
     pending_item_key: Option<String>,
     prompt: String,
     input: String,
@@ -53,6 +54,7 @@ impl App {
             selected_view: None,
             prev_view: None,
             browse: StatefulList::new(),
+            browse_match_list: Vec::new(),
             pending_item_key: None,
             prompt: String::new(),
             input: String::new(),
@@ -181,7 +183,7 @@ impl App {
                         } else {
                             None
                         };
-    
+
                         self.zones.select(index);
                         self.queue.deselect();
                         self.browse.deselect();
@@ -206,12 +208,27 @@ impl App {
     fn select_next_view(&mut self) {
         let view_order = vec![View::Browse, View::Queue, View::NowPlaying];
         let next = match self.selected_view.as_ref() {
-            Some(selected_view) => view_order.get(selected_view.to_owned() as usize + 1),
+            Some(selected_view) => {
+                view_order.get(selected_view.to_owned() as usize + 1)
+            }
             None => return,
         };
         let next = next.cloned().unwrap_or(View::Browse);
 
         self.select_view(Some(next));
+    }
+
+    fn select_prev_view(&mut self) {
+        let view_order = vec![View::Browse, View::Queue, View::NowPlaying];
+        let prev = match self.selected_view.as_ref() {
+            Some(selected_view) => {
+                view_order.get((selected_view.to_owned() as usize).wrapping_sub(1))
+            }
+            None => return,
+        };
+        let prev = prev.cloned().unwrap_or(View::NowPlaying);
+
+        self.select_view(Some(prev));
     }
 
     fn restore_view(&mut self) {
@@ -282,13 +299,115 @@ impl App {
         self.cursor_position = 0;
     }
 
+    fn select_by_input(&mut self, key: char) {
+        if !key.is_ascii() {
+            return;
+        }
+
+        if let Some(items) = self.browse.items.as_ref() {
+            let key = key.to_ascii_lowercase();
+            let input = format!("{}{}", self.input, key);
+            let split = if let Some(title) = self.browse.title.as_ref() {
+                title == "Artists" || title == "Composers"
+            } else {
+                false
+            };
+            let mut order: Vec<char> = ('['..='~').rev().collect();
+            order = [order, ('!'..='@').rev().collect()].concat();
+
+            let index = if self.browse_match_list.is_empty() {
+                items
+                    .iter()
+                    .position(|item| {
+                        if item.title.chars().position(|c| !c.is_ascii()).is_some() {
+                            return false;
+                        }
+
+                        while let Some(pop) = order.last() {
+                            let mut pop_matched = false;
+                            let mut matching = |sub: &str| {
+                                if let Some(first_char) = sub.chars().next().unwrap().to_lowercase().next() {
+                                    if first_char == *pop {
+                                        if first_char == key {
+                                            return true;
+                                        } else {
+                                            pop_matched = true;
+                                        }
+                                    }
+                                }
+
+                                false
+                            };
+                            let result = if split {
+                                item.title.split(' ')
+                                    .position(matching)
+                                    .is_some()
+                            } else {
+                                let title = item.title
+                                    .to_ascii_lowercase()
+                                    .replacen("the ", "", 1);
+                                matching(&title)
+                            };
+
+                            if result {
+                                return result;
+                            } else if key == *pop || pop_matched {
+                                break;
+                            }
+
+                            order.pop();
+                        }
+
+                        false
+                    })
+            } else {
+                let skip = *self.browse_match_list.last().unwrap();
+                let position = items
+                    .iter()
+                    .skip(skip)
+                    .position(|item| {
+                        if item.title.chars().position(|c| !c.is_ascii()).is_some() {
+                            return false;
+                        }
+
+                        // Find an upcoming item with matching input
+                        let title = item.title
+                            .to_ascii_lowercase()
+                            .replacen("the ", "", 1);
+
+                        if split {
+                            title.contains(input.as_str())
+                        } else {
+                            title.starts_with(input.as_str())
+                        }
+                    });
+
+                if let Some(position) = position {
+                    Some(skip + position)
+                } else {
+                    None
+                }
+            };
+
+            if index.is_some() {
+                self.input = input;
+                self.browse_match_list.push(index.unwrap());
+                self.browse.state.select(index);
+            }
+        }
+    }
+
     async fn do_action(&mut self, key: KeyEvent) -> AppReturn {
         if key.kind == KeyEventKind::Press {
             // Global key codes
             match key.modifiers {
                 KeyModifiers::NONE => {
                     match key.code {
-                        KeyCode::Tab => self.select_next_view(),
+                        KeyCode::Tab => {
+                            self.input.clear();
+                            self.browse_match_list.clear();
+                            self.select_next_view();
+                        }
                         _ => {
                             // Key codes specific to the active view
                             if let Some(view) = self.selected_view.as_ref() {
@@ -300,6 +419,16 @@ impl App {
                                 }
                             }
                         }
+                    }
+                }
+                KeyModifiers::SHIFT => {
+                    match key.code {
+                        KeyCode::BackTab => {
+                            self.input.clear();
+                            self.browse_match_list.clear();
+                            self.select_prev_view();
+                        }
+                        _ => (),
                     }
                 }
                 KeyModifiers::CONTROL => {
@@ -339,13 +468,27 @@ impl App {
                     self.to_roon.send(IoEvent::BrowseHome).await.unwrap();
                 }
             }
+            KeyModifiers::SHIFT => {
+                match key.code {
+                    KeyCode::Char(key) => self.select_by_input(key),
+                    _ => (),
+                }
+            }
             KeyModifiers::NONE => {
                 match key.code {
+                    KeyCode::Char(key) => self.select_by_input(key),
+                    KeyCode::Backspace => {
+                        self.input.pop();
+                        self.browse_match_list.pop();
+                        self.browse.select(self.browse_match_list.last().cloned());
+                    }
                     KeyCode::Up => self.browse.prev(),
                     KeyCode::Down => self.browse.next(),
                     KeyCode::Enter => {
+                        self.input.clear();
+                        self.browse_match_list.clear();
                         let item_key = self.get_item_key();
-        
+
                         if let Some(item) = self.browse.get_selected_item() {
                             if let Some(prompt) = item.input_prompt.as_ref() {
                                 self.prompt = prompt.prompt.to_owned();
@@ -356,7 +499,11 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Esc => self.to_roon.send(IoEvent::BrowseBack).await.unwrap(),
+                    KeyCode::Esc => {
+                        self.input.clear();
+                        self.browse_match_list.clear();
+                        self.to_roon.send(IoEvent::BrowseBack).await.unwrap();
+                    }
                     KeyCode::Home => self.browse.select_first(),
                     KeyCode::End => self.browse.select_last(),
                     KeyCode::PageUp => self.browse.select_prev_page(),
@@ -411,7 +558,7 @@ impl App {
                             self.to_roon.send(IoEvent::BrowseInput(self.input.clone())).await.unwrap();
                             self.to_roon.send(IoEvent::BrowseSelected(self.pending_item_key.take())).await.unwrap();
                         }
-        
+
                         self.input.clear();
                         self.reset_cursor();
                         self.restore_view();

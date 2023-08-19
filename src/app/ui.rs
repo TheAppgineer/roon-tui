@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Span, Line},
-    widgets::{block::{self, Block, Title}, BorderType, Borders, Clear, Gauge, List, ListItem, Padding, Paragraph},
+    widgets::{block::{self, Block, Position, Title}, BorderType, Borders, Clear, Gauge, List, ListItem, Padding, Paragraph},
 };
 use roon_api::transport::{State, Zone, Repeat, volume::Scale};
 
@@ -142,6 +142,14 @@ where
                         Span::styled(progress, Style::default().fg(Color::Reset))
                     ).alignment(Alignment::Right)
                 );
+
+                if !app.input.is_empty() {
+                    block = block.title(
+                        Title::from(
+                            Span::styled(app.input.as_str(), Style::default().fg(Color::Reset))
+                        ).position(Position::Bottom)
+                    );
+                }
             }
         }
     }
@@ -401,12 +409,21 @@ fn trim_string(string: &str, trim_len: usize) -> (usize, &str) {
 fn get_status_lines(zone: &Zone, style: Style) -> Vec<Line> {
     let volume = if let Some(output) = zone.outputs.get(0) {
         if let Some(volume) = output.volume.as_ref() {
-            if volume.is_muted {
-                "Vol   Muted".to_owned()
-            } else {
-                match volume.scale {
-                    Scale::Decibel => format!("Vol {:4} dB", volume.value),
-                    _ => format!("Vol {:7}", volume.value),
+            match volume.scale {
+                Scale::Incremental => "Vol Incrmnt".to_owned(),
+                _ => {
+                    let is_muted = volume.is_muted.unwrap_or_default();
+
+                    if is_muted {
+                        "Vol   Muted".to_owned()
+                    } else {
+                        let volume_level = volume.value.unwrap();
+                        match volume.scale {
+                            Scale::Decibel => format!("Vol {:4} dB", volume_level),
+                            Scale::Number => format!("Vol {:7}", volume_level),
+                            _ => String::new(),
+                        }
+                    }
                 }
             }
         } else {
