@@ -1,6 +1,6 @@
 # roon-tui
 
-A Roon Remote for the terminal
+### A Roon Remote for the terminal
 
 ![Roon TUI screenshot](images/screenshot.png)
 
@@ -21,6 +21,16 @@ On first execution the outside border of the UI will be highlighted without any 
 
 ## Project Status
 This is Alpha stage software. Instead of using the official [Node.js Roon API](https://github.com/RoonLabs/node-roon-api) provided by Roon Labs this project uses an own developed [Rust port](https://github.com/TheAppgineer/rust-roon-api) of the API.
+
+## Usage Instructions
+### Multi-character Jump in Browse View
+After a list of Artists, Albums, etc. is selected, and it is known what to play, a name can be directly typed in the Browse View. The first item that matches the input will be selected. The currently matched characters are displayed in the lower left corner of the view. The Backspace key can be used to revert to previous selections.
+
+Some important remarks:
+* Relies on sort setting for Artists and Composers, type first/last name depending on setting
+* Ignores "The" in item names, as this is not used in sorting, meaning "The" should not be included in the input
+* Is case insensitive
+* Only supports the standard (ASCII) characters, i.e., no unicode
 
 ## Key Bindings
 ### Global (useable in all views)
