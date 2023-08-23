@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, fs, path};
+use std::sync::Arc;
 use tokio::{sync::mpsc, select};
 
 use roon_api::{
@@ -22,10 +23,12 @@ struct Settings {
     zone_id: Option<String>,
 }
 
-pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
+pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
+    let path = path::Path::new(&config_path);
     let mut info = info!("com.theappgineer", "Roon TUI");
 
     info.set_log_level(LogLevel::None);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
 
     let mut roon = RoonApi::new(info);
     let services = vec![
@@ -33,11 +36,17 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
         Services::Transport(Transport::new()),
     ];
     let provided: HashMap<String, Svc> = HashMap::new();
-    let (_, mut core_rx) = roon.start_discovery(provided, Some(services)).await.unwrap();
+    let config_path = Arc::new(config_path);
+    let config_path_clone = config_path.clone();
+    let get_roon_state = move || {
+        RoonApi::load_config(&config_path_clone, "roonstate")
+    };
+    let (_, mut core_rx) = roon
+        .start_discovery(Box::new(get_roon_state), provided, Some(services)).await.unwrap();
 
     tokio::spawn(async move {
         const QUEUE_ITEM_COUNT: u32 = 100;
-        let mut settings = serde_json::from_value::<Settings>(RoonApi::load_config("settings")).unwrap_or_default();
+        let mut settings = serde_json::from_value::<Settings>(RoonApi::load_config(&config_path, "settings")).unwrap_or_default();
         let mut browse = None;
         let mut transport = None;
         let mut opts: BrowseOpts = BrowseOpts::default();
@@ -75,8 +84,11 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
                         _ => (),
                     }
 
-                    if let Some((_, parsed)) = msg {
+                    if let Some((msg, parsed)) = msg {
                         match parsed {
+                            Parsed::RoonState => {
+                                RoonApi::save_config(&config_path, "roonstate", msg).unwrap();
+                            }
                             Parsed::Zones(zones) => {
                                 for zone in zones {
                                     zone_map.insert(zone.zone_id.to_owned(), zone);
@@ -190,7 +202,7 @@ pub async fn start(to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<I
 
                                 let settings = settings.serialize(serde_json::value::Serializer).unwrap();
 
-                                RoonApi::save_config("settings", settings.to_owned()).unwrap();
+                                RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
                             }
                         }
                         IoEvent::Mute(how) => {
