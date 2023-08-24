@@ -1,3 +1,4 @@
+use any_ascii::any_ascii;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use roon_api::{
     browse,
@@ -319,9 +320,7 @@ impl App {
                 items
                     .iter()
                     .position(|item| {
-                        if item.title.chars().position(|c| !c.is_ascii()).is_some() {
-                            return false;
-                        }
+                        let title = any_ascii(&item.title);
 
                         while let Some(pop) = order.last() {
                             let mut pop_matched = false;
@@ -339,11 +338,11 @@ impl App {
                                 false
                             };
                             let result = if split {
-                                item.title.split(' ')
+                                title.split(' ')
                                     .position(matching)
                                     .is_some()
                             } else {
-                                let title = item.title
+                                let title = title
                                     .to_ascii_lowercase()
                                     .replacen("the ", "", 1);
                                 matching(&title)
@@ -366,17 +365,15 @@ impl App {
                     .iter()
                     .skip(skip)
                     .position(|item| {
-                        if item.title.chars().position(|c| !c.is_ascii()).is_some() {
-                            return false;
-                        }
-
                         // Find an upcoming item with matching input
-                        let title = item.title
+                        let title = any_ascii(&item.title)
                             .to_ascii_lowercase()
                             .replacen("the ", "", 1);
 
                         if split {
-                            title.contains(input.as_str())
+                            title.split(' ')
+                                .position(|sub| sub.starts_with(input.as_str()))
+                                .is_some()
                         } else {
                             title.starts_with(input.as_str())
                         }
@@ -504,7 +501,14 @@ impl App {
                         self.browse_match_list.clear();
                         self.to_roon.send(IoEvent::BrowseBack).await.unwrap();
                     }
-                    KeyCode::Home => self.browse.select_first(),
+                    KeyCode::Home => {
+                        if self.input.is_empty() {
+                            self.browse.select_first();
+                        } else {
+                            self.input.clear();
+                            self.browse_match_list.clear();
+                        }
+                    }
                     KeyCode::End => self.browse.select_last(),
                     KeyCode::PageUp => self.browse.select_prev_page(),
                     KeyCode::PageDown => self.browse.select_next_page(),
