@@ -23,14 +23,20 @@ On first execution the outside border of the UI will be highlighted without any 
 This is Alpha stage software. Instead of using the official [Node.js Roon API](https://github.com/RoonLabs/node-roon-api) provided by Roon Labs this project uses an own developed [Rust port](https://github.com/TheAppgineer/rust-roon-api) of the API.
 
 ## Usage Instructions
+### Specifying Configuration File on Command Line
+At startup the default location to get the `config.json` configuration file from is the current working directory. This is troublesome when the executable is placed in a system folder and accessed by using the `PATH` environment variable, because the user account might not have permissions to write to that location. This can be solved by placing the configuration file somewehere in the home folder and specifying its location at startup on the command line. In the below example the file is stored in the users `.config` folder:
+
+    roon-tui ~/.config/roon-tui/config.json
+
 ### Multi-character Jump in Browse View
-After a list of Artists, Albums, etc. is selected, and it is known what to play, a name can be directly typed in the Browse View. The first item that matches the input will be selected. The currently matched characters are displayed in the lower left corner of the view. The Backspace key can be used to revert to previous selections.
+After a list of Artists, Albums, etc. is selected, and it is known what to play, a name can be directly typed in the Browse View. The first item that matches the input will be selected. The currently matched characters are displayed in the lower left corner of the view. The Backspace key can be used to revert to previous selections, the Home keys clears the complete input.
 
 Some important remarks:
 * Relies on sort setting for Artists and Composers, type first/last name depending on setting
 * Ignores "The" in item names, as this is not used in sorting, meaning "The" should not be included in the input
 * Is case insensitive
-* Only supports the standard (ASCII) characters, i.e., no unicode
+* Only supports ASCII characters as input, i.e., no unicode input
+* Any unicode characters in items are converted to closest ASCII match before matching takes place
 
 ## Key Bindings
 ### Global (useable in all views)
