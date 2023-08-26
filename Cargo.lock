@@ -27,6 +27,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "any_ascii"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea50b14b7a4b9343f8c627a7a53c52076482bd4bdad0a24fd3ec533ed616cc2c"
+
+[[package]]
 name = "autocfg"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -561,8 +567,8 @@ checksum = "e5ea92a5b6195c6ef2a0295ea818b312502c6fc94dde986c5553242e18fd4ce2"
 
 [[package]]
 name = "roon-api"
-version = "0.0.4"
-source = "git+https://github.com/TheAppgineer/rust-roon-api.git?tag=0.0.4#921acf8a4ff6920a2e66a398e2d1fa656e5049d5"
+version = "0.0.5"
+source = "git+https://github.com/TheAppgineer/rust-roon-api.git?tag=0.0.5#e7fc2b71a8edc9f6bd76b60004573b2040c39f0f"
 dependencies = [
  "futures-util",
  "if-addrs",
@@ -577,8 +583,9 @@ dependencies = [
 
 [[package]]
 name = "roon-tui"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
+ "any_ascii",
  "crossterm 0.27.0",
  "eyre",
  "log",
