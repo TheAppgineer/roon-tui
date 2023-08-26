@@ -315,7 +315,17 @@ where
             frame.render_widget(text, hor_chunks[0]);
 
             let duration = now_playing.length.unwrap_or_default();
-            draw_progress_gauge(frame, vert_chunks[1], app, view, duration);
+            let seek_position = if let Some(zone_seek) = app.zone_seek.as_ref() {
+                if zone_seek.seek_position.is_some() {
+                    zone_seek.seek_position
+                } else {
+                    now_playing.seek_position
+                }
+            } else {
+                now_playing.seek_position
+            };
+
+            draw_progress_gauge(frame, vert_chunks[1], app, view, duration, seek_position);
 
             let play_state_title = match zone.state {
                 State::Loading => "Loading",
@@ -351,12 +361,13 @@ fn draw_progress_gauge<B>(
     area: Rect,
     app: &App,
     view: Option<&View>,
-    duration: u32
+    duration: u32,
+    seek_position: Option<i64>,
 ) -> Option<()>
 where
     B: Backend,
 {
-    let elapsed = app.zone_seek.as_ref()?.seek_position? as u32;
+    let elapsed = seek_position? as u32;
     let progress = if duration > 0 {elapsed * 100 / duration} else {0};
     let elapsed = get_time_string(elapsed);
     let label = if duration > 0 {
