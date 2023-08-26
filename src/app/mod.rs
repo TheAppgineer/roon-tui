@@ -540,6 +540,10 @@ impl App {
             KeyCode::PageDown => self.queue.select_next_page(),
             KeyCode::Enter => {
                 if let Some(queue_item_id) = self.get_queue_item_id() {
+                    // Items before the selected one will be removed from the queue
+                    // meaning that the selected one will get on top
+                    self.queue.select_first();
+
                     self.to_roon.send(IoEvent::QueueSelected(queue_item_id)).await.unwrap();
                 }
             }
