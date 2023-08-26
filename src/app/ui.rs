@@ -418,8 +418,15 @@ fn get_status_lines(zone: &Zone, style: Style) -> Vec<Line> {
                         "Vol   Muted".to_owned()
                     } else {
                         let volume_level = volume.value.unwrap();
+
                         match volume.scale {
-                            Scale::Decibel => format!("Vol {:4} dB", volume_level),
+                            Scale::Decibel => {
+                                if volume.step.unwrap() < 1.0 {
+                                    format!("Vol {:5.1}dB", volume_level)
+                                } else {
+                                    format!("Vol {:5}dB", volume_level)
+                                }
+                            }
                             Scale::Number => format!("Vol {:7}", volume_level),
                             _ => String::new(),
                         }
