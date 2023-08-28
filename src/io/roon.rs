@@ -261,12 +261,14 @@ async fn handle_parsed_response(
                 let new_offset = result.offset + result.items.len();
 
                 if new_offset < result.list.count {
-                    let opts = BrowseOpts {
-                        set_display_offset: Some(new_offset),
+                    // There are more items to load
+                    let opts = LoadOpts {
+                        offset: new_offset,
+                        set_display_offset: new_offset,
                         ..Default::default()
                     };
 
-                    browse.browse(&opts).await;
+                    browse.load(&opts).await;
                 }
 
                 to_app.send(IoEvent::BrowseList(result.offset, result.items)).await.unwrap();
