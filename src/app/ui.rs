@@ -243,6 +243,14 @@ where
                     ).alignment(Alignment::Left)
                 );
             }
+        } else {
+            if let Some(queue_time_remaining) = get_queue_time_remaining(&app) {
+                block = block.title(
+                    Title::from(
+                        Span::styled(queue_time_remaining, Style::default().fg(Color::Reset))
+                    ).alignment(Alignment::Left)
+                );
+            }
         }
     }
 
@@ -405,6 +413,21 @@ fn get_time_string(seconds: u32) -> String {
         format!("{}:{:02}:{:02}", hours, minutes, seconds)
     } else {
         format!("{}:{:02}", minutes, seconds)
+    }
+}
+
+fn get_queue_time_remaining(app: &App) -> Option<String> {
+    let zone = app.selected_zone.as_ref()?;
+    let now_playing = zone.now_playing.as_ref()?;
+    let queue_time_remaining = match app.zone_seek.as_ref() {
+        Some(zone_seek) => zone_seek.queue_time_remaining,
+        None => zone.queue_time_remaining,
+    };
+
+    if queue_time_remaining > 0 && now_playing.length.is_some() {
+        Some(get_time_string(queue_time_remaining as u32))
+    } else {
+        None
     }
 }
 
