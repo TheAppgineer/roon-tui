@@ -46,6 +46,7 @@ Some important remarks:
 |Shift-Tab|Reverse switch between views
 |Ctrl-z|Open zone selector
 |Ctrl-p|Play / Pause
+|Ctrl-e|Pause at End of Track
 |Ctrl-c|Quit
 ### Common list controls
 |||

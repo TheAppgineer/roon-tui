@@ -13,7 +13,7 @@ use roon_api::{
     RoonApi,
     Services,
     Svc,
-    transport::{Control, Transport, volume, Zone},
+    transport::{Control, State, Transport, volume, Zone},
 };
 
 use super::IoEvent;
@@ -51,6 +51,7 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
         let mut transport = None;
         let mut opts: BrowseOpts = BrowseOpts::default();
         let mut zone_map = HashMap::new();
+        let mut pause_on_track_end = false;
 
         loop {
             select! {
@@ -106,6 +107,11 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
 
                                 if let Some(zone_id) = settings.zone_id.as_ref() {
                                     if let Some(zone) = zone_map.get(zone_id) {
+                                        if zone.state != State::Playing && pause_on_track_end {
+                                            pause_on_track_end = false;
+                                            to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
+                                        }
+
                                         to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
                                     }
                                 }
@@ -125,6 +131,14 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                                 if let Some(zone_id) = settings.zone_id.as_ref() {
                                     if let Some(index) = seeks.iter().position(|seek| seek.zone_id == *zone_id) {
                                         let seek = seeks[index].to_owned();
+
+                                        if let Some(seek_position) = seek.seek_position {
+                                            if seek_position == 0 && pause_on_track_end {
+                                                control(transport.as_ref(), settings.zone_id.as_deref(), &Control::Pause).await;
+                                                pause_on_track_end = false;
+                                                to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
+                                            }
+                                        }
 
                                         to_app.send(IoEvent::ZoneSeek(seek)).await.unwrap();
                                     }
@@ -214,12 +228,24 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                         IoEvent::Control(how) => {
                             control(transport.as_ref(), settings.zone_id.as_deref(), &how).await;
                         }
+                        IoEvent::PauseOnTrackEndReq => {
+                            pause_on_track_end = handle_pause_on_track_end_req(&settings, &zone_map).unwrap_or_default();
+                            to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
+                        }
                         _ => (),
                     }
                 }
             }
         }
     });
+}
+
+fn handle_pause_on_track_end_req(settings: &Settings, zone_map: &HashMap<String, Zone>) -> Option<bool> {
+    let zone_id = settings.zone_id.as_ref()?;
+    let zone = zone_map.get(zone_id)?;
+    let now_playing_length = zone.now_playing.as_ref()?.length?;
+
+    Some(zone.state == State::Playing && now_playing_length > 0)
 }
 
 async fn handle_parsed_response(
@@ -261,12 +287,14 @@ async fn handle_parsed_response(
                 let new_offset = result.offset + result.items.len();
 
                 if new_offset < result.list.count {
-                    let opts = BrowseOpts {
-                        set_display_offset: Some(new_offset),
+                    // There are more items to load
+                    let opts = LoadOpts {
+                        offset: new_offset,
+                        set_display_offset: new_offset,
                         ..Default::default()
                     };
 
-                    browse.browse(&opts).await;
+                    browse.load(&opts).await;
                 }
 
                 to_app.send(IoEvent::BrowseList(result.offset, result.items)).await.unwrap();

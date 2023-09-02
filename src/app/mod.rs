@@ -44,6 +44,7 @@ pub struct App {
     selected_zone: Option<Zone>,
     zone_seek: Option<ZoneSeek>,
     queue: StatefulList<QueueItem>,
+    pause_on_track_end: bool,
 }
 
 impl App {
@@ -65,6 +66,7 @@ impl App {
             selected_zone: None,
             zone_seek: None,
             queue: StatefulList::new(),
+            pause_on_track_end: false,
         }
     }
 
@@ -126,6 +128,7 @@ impl App {
                 }
                 IoEvent::ZoneRemoved(_) => self.selected_zone = None,
                 IoEvent::ZoneSeek(seek) => self.zone_seek = Some(seek),
+                IoEvent::PauseOnTrackEndActive(pause_on_track_end) => self.pause_on_track_end = pause_on_track_end,
                 _ => ()
             }
         }
@@ -396,6 +399,9 @@ impl App {
 
     async fn do_action(&mut self, key: KeyEvent) -> AppReturn {
         if key.kind == KeyEventKind::Press {
+            // Create a clone of selected_view to prevent second handle call on updated view
+            let selected_view = self.selected_view.clone();
+
             // Global key codes
             match key.modifiers {
                 KeyModifiers::NONE => {
@@ -407,7 +413,7 @@ impl App {
                         }
                         _ => {
                             // Key codes specific to the active view
-                            if let Some(view) = self.selected_view.as_ref() {
+                            if let Some(view) = selected_view.as_ref() {
                                 match *view {
                                     View::NowPlaying => self.handle_now_playing_key_codes(key).await,
                                     View::Queue => self.handle_queue_key_codes(key).await,
@@ -430,9 +436,10 @@ impl App {
                 }
                 KeyModifiers::CONTROL => {
                     match key.code {
+                        KeyCode::Char('e') => self.to_roon.send(IoEvent::PauseOnTrackEndReq).await.unwrap(),
                         KeyCode::Char('p') => self.to_roon.send(IoEvent::Control(Control::PlayPause)).await.unwrap(),
                         KeyCode::Char('z') => {
-                            if let Some(View::Prompt) = self.selected_view {
+                            if let Some(View::Prompt) = selected_view.as_ref() {
                                 self.restore_view();
                             }
 
@@ -446,7 +453,7 @@ impl App {
             }
 
             // Key codes specific to the active view (with own modifier handling)
-            if let Some(view) = self.selected_view.as_ref() {
+            if let Some(view) = selected_view.as_ref() {
                 match *view {
                     View::Browse => self.handle_browse_key_codes(key).await,
                     View::Prompt => self.handle_prompt_key_codes(key).await,

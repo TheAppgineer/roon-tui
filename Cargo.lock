@@ -583,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "roon-tui"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "any_ascii",
  "crossterm 0.27.0",
