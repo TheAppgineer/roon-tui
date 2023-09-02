@@ -28,4 +28,6 @@ pub enum IoEvent {
     Mute(volume::Mute),
     ChangeVolume(i32),
     Control(Control),
+    PauseOnTrackEndReq,
+    PauseOnTrackEndActive(bool),
 }

@@ -44,6 +44,7 @@ pub struct App {
     selected_zone: Option<Zone>,
     zone_seek: Option<ZoneSeek>,
     queue: StatefulList<QueueItem>,
+    pause_on_track_end: bool,
 }
 
 impl App {
@@ -65,6 +66,7 @@ impl App {
             selected_zone: None,
             zone_seek: None,
             queue: StatefulList::new(),
+            pause_on_track_end: false,
         }
     }
 
@@ -126,6 +128,7 @@ impl App {
                 }
                 IoEvent::ZoneRemoved(_) => self.selected_zone = None,
                 IoEvent::ZoneSeek(seek) => self.zone_seek = Some(seek),
+                IoEvent::PauseOnTrackEndActive(pause_on_track_end) => self.pause_on_track_end = pause_on_track_end,
                 _ => ()
             }
         }
@@ -433,6 +436,7 @@ impl App {
                 }
                 KeyModifiers::CONTROL => {
                     match key.code {
+                        KeyCode::Char('e') => self.to_roon.send(IoEvent::PauseOnTrackEndReq).await.unwrap(),
                         KeyCode::Char('p') => self.to_roon.send(IoEvent::Control(Control::PlayPause)).await.unwrap(),
                         KeyCode::Char('z') => {
                             if let Some(View::Prompt) = selected_view.as_ref() {

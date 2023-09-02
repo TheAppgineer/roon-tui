@@ -338,7 +338,11 @@ where
             let play_state_title = match zone.state {
                 State::Loading => "Loading",
                 State::Paused => "Paused",
-                State::Playing => "Playing",
+                State::Playing => if app.pause_on_track_end {
+                    "Pause at End of Track"
+                } else {
+                    "Playing"
+                },
                 State::Stopped => "Stopped",
             };
 
