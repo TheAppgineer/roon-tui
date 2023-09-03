@@ -49,9 +49,12 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
         let mut settings = serde_json::from_value::<Settings>(RoonApi::load_config(&config_path, "settings")).unwrap_or_default();
         let mut browse = None;
         let mut transport = None;
-        let mut opts: BrowseOpts = BrowseOpts::default();
         let mut zone_map = HashMap::new();
         let mut pause_on_track_end = false;
+        let mut opts = BrowseOpts {
+            multi_session_key: Some("tui_browse".to_owned()),
+            ..Default::default()
+        };
 
         loop {
             select! {
@@ -62,10 +65,7 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                             transport = paired_core.get_transport().cloned();
 
                             if let Some(browse) = browse.as_ref() {
-                                let opts = BrowseOpts {
-                                    pop_all: true,
-                                    ..Default::default()
-                                };
+                                opts.pop_all = true;
 
                                 browse.browse(&opts).await;
                             }
@@ -255,7 +255,7 @@ async fn handle_parsed_response(
 ) {
     if let Some(browse) = browse {
         match parsed {
-            Parsed::BrowseResult(result) => {
+            Parsed::BrowseResult(result, multi_session_key) => {
                 match result.action {
                     Action::List => {
                         if let Some(list) = result.list {
@@ -266,6 +266,7 @@ async fn handle_parsed_response(
                                 count: Some(100),
                                 offset,
                                 set_display_offset: offset,
+                                multi_session_key,
                                 ..Default::default()
                             };
 
@@ -283,7 +284,7 @@ async fn handle_parsed_response(
                     _ => (),
                 }
             }
-            Parsed::LoadResult(result) => {
+            Parsed::LoadResult(result, multi_session_key) => {
                 let new_offset = result.offset + result.items.len();
 
                 if new_offset < result.list.count {
@@ -291,6 +292,7 @@ async fn handle_parsed_response(
                     let opts = LoadOpts {
                         offset: new_offset,
                         set_display_offset: new_offset,
+                        multi_session_key,
                         ..Default::default()
                     };
 
