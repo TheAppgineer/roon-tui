@@ -6,7 +6,7 @@ use roon_api::{
 };
 use tokio::sync::mpsc;
 
-use crate::io::IoEvent;
+use crate::io::{IoEvent, QueueMode};
 use crate::app::stateful_list::StatefulList;
 
 pub mod ui;
@@ -19,7 +19,7 @@ pub enum AppReturn {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum View {
+enum View {
     Browse = 0,
     Queue = 1,
     NowPlaying = 2,
@@ -45,6 +45,7 @@ pub struct App {
     zone_seek: Option<ZoneSeek>,
     queue: StatefulList<QueueItem>,
     pause_on_track_end: bool,
+    queue_mode: Option<&'static str>,
 }
 
 impl App {
@@ -67,6 +68,7 @@ impl App {
             zone_seek: None,
             queue: StatefulList::new(),
             pause_on_track_end: false,
+            queue_mode: None,
         }
     }
 
@@ -111,6 +113,15 @@ impl App {
                 }
                 IoEvent::QueueListChanges(changes) => {
                     self.apply_queue_changes(changes);
+                }
+                IoEvent::QueueModeCurrent(queue_mode) => {
+                    let queue_mode = match queue_mode {
+                        QueueMode::Manual => None,
+                        QueueMode::RoonRadio => Some("Roon Radio"),
+                        QueueMode::RandomAlbum => Some("Random Album"),
+                        QueueMode::RandomTrack => Some("Random Track"),
+                    };
+                    self.queue_mode = queue_mode;
                 }
                 IoEvent::Zones(zones) => {
                     self.zones.items = Some(zones);
@@ -438,6 +449,7 @@ impl App {
                     match key.code {
                         KeyCode::Char('e') => self.to_roon.send(IoEvent::PauseOnTrackEndReq).await.unwrap(),
                         KeyCode::Char('p') => self.to_roon.send(IoEvent::Control(Control::PlayPause)).await.unwrap(),
+                        KeyCode::Char('q') => self.to_roon.send(IoEvent::QueueModeNext).await.unwrap(),
                         KeyCode::Char('z') => {
                             if let Some(View::Prompt) = selected_view.as_ref() {
                                 self.restore_view();

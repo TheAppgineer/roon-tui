@@ -16,11 +16,12 @@ use roon_api::{
     transport::{Control, State, Transport, volume, Zone},
 };
 
-use super::IoEvent;
+use super::{IoEvent, QueueMode};
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct Settings {
     zone_id: Option<String>,
+    queue_mode: HashMap<String, QueueMode>,
 }
 
 pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
@@ -46,7 +47,7 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
 
     tokio::spawn(async move {
         const QUEUE_ITEM_COUNT: u32 = 100;
-        let mut settings = serde_json::from_value::<Settings>(RoonApi::load_config(&config_path, "settings")).unwrap_or_default();
+        let mut settings: Settings = serde_json::from_value(RoonApi::load_config(&config_path, "settings")).unwrap_or_default();
         let mut browse = None;
         let mut transport = None;
         let mut zone_map = HashMap::new();
@@ -107,6 +108,13 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
 
                                 if let Some(zone_id) = settings.zone_id.as_ref() {
                                     if let Some(zone) = zone_map.get(zone_id) {
+                                        if let Some(queue_mode) = sync_queue_mode(&mut settings, zone.settings.auto_radio) {
+                                            to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
+
+                                            let settings = settings.serialize(serde_json::value::Serializer).unwrap();
+                                            RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
+                                        }
+
                                         if zone.state != State::Playing && pause_on_track_end {
                                             pause_on_track_end = false;
                                             to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
@@ -203,16 +211,37 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                                 }
                             }
                         }
+                        IoEvent::QueueModeNext => {
+                            if let Some(queue_mode) = select_next_queue_mode(&mut settings) {
+                                to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
+
+                                let auto_radio = match queue_mode {
+                                    QueueMode::RoonRadio => true,
+                                    _ => false,
+                                };
+
+                                set_roon_radio(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), auto_radio).await.unwrap();
+
+                                let settings = settings.serialize(serde_json::value::Serializer).unwrap();
+                                RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
+                            }
+                        }
                         IoEvent::ZoneSelected(zone_id) => {
                             if let Some(transport) = transport.as_ref() {
                                 transport.unsubscribe_queue().await;
                                 transport.subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
 
-                                if let Some(zone) = zone_map.get(&zone_id) {
-                                    to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
-                                }
+                                let zone = zone_map.get(&zone_id);
 
                                 settings.zone_id = Some(zone_id);
+
+                                if let Some(zone) = zone {
+                                    if let Some(queue_mode) = sync_queue_mode(&mut settings, zone.settings.auto_radio) {
+                                        to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
+                                    }
+
+                                    to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
+                                }
 
                                 let settings = settings.serialize(serde_json::value::Serializer).unwrap();
 
@@ -312,6 +341,42 @@ async fn handle_parsed_response(
     }
 }
 
+fn select_next_queue_mode<'a>(settings: &'a mut Settings) -> Option<&'a QueueMode> {
+    let zone_id = settings.zone_id.as_ref()?;
+    let queue_mode = settings.queue_mode.get_mut(zone_id)?;
+    let index = queue_mode.to_owned() as usize + 1;
+    let seq = vec![
+        QueueMode::Manual,
+        QueueMode::RoonRadio,
+    ];
+
+    *queue_mode = match seq.get(index) {
+        None => QueueMode::Manual,
+        Some(queue_mode) => queue_mode.to_owned(),
+    };
+
+    Some(queue_mode)
+}
+
+fn sync_queue_mode<'a>(settings: &'a mut Settings, auto_radio: bool) -> Option<&'a QueueMode> {
+    let zone_id = settings.zone_id.as_ref()?;
+    let queue_mode = if auto_radio {
+        QueueMode::RoonRadio
+    } else if let Some(queue_mode) = settings.queue_mode.get(zone_id) {
+        if *queue_mode == QueueMode::RoonRadio {
+            QueueMode::default()
+        } else {
+            queue_mode.to_owned()
+        }
+    } else {
+        QueueMode::default()
+    };
+
+    settings.queue_mode.insert(zone_id.to_owned(), queue_mode);
+
+    settings.queue_mode.get(zone_id)
+}
+
 async fn mute(
     transport: Option<&Transport>,
     zone_map: &HashMap<String, Zone>,
@@ -353,4 +418,16 @@ async fn control(
     how: &Control,
 ) -> Option<usize> {
     transport?.control(zone_id?, how).await
+}
+
+async fn set_roon_radio(
+    transport: Option<&Transport>,
+    zone_map: &HashMap<String, Zone>,
+    zone_id: Option<&str>,
+    auto_radio: bool,
+) -> Option<usize> {
+    let mut settings = zone_map.get(zone_id?)?.settings.clone();
+
+    settings.auto_radio = auto_radio;
+    transport?.change_settings(zone_id?, settings).await
 }

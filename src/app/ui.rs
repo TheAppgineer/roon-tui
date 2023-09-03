@@ -172,6 +172,14 @@ where
         ))
         .title_alignment(Alignment::Right);
 
+    if let Some(queue_mode) = app.queue_mode {
+        block = block.title(
+            Title::from(
+                Span::styled(queue_mode, Style::default().fg(Color::Reset))
+            ).position(Position::Bottom)
+        );
+    }
+
     app.queue.prepare_paging(page_lines, |item| if item.two_line.line2.is_empty() {1} else {2});
 
     if let Some(queue_items) = &app.queue.items {
@@ -489,10 +497,6 @@ fn get_status_lines(zone: &Zone, style: Style) -> Vec<Line> {
         Line::from(Span::styled(format!("{}", repeat_icon), style)),
         Line::from(Span::styled(
             format!("{}", if settings.shuffle {"Shuffle  On"} else {"Shuffle Off"}),
-            style
-        )),
-        Line::from(Span::styled(
-            format!("{}", if settings.auto_radio {"Radio    On"} else {"Radio   Off"}),
             style
         )),
     ]
