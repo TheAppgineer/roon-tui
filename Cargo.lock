@@ -589,6 +589,7 @@ dependencies = [
  "crossterm 0.27.0",
  "eyre",
  "log",
+ "rand",
  "ratatui",
  "roon-api",
  "serde",

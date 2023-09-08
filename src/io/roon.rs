@@ -1,3 +1,4 @@
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path};
 use std::sync::Arc;
@@ -5,7 +6,7 @@ use tokio::{sync::mpsc, select};
 
 use roon_api::{
     info,
-    browse::{Action, Browse, BrowseOpts, LoadOpts},
+    browse::{Action, Browse, BrowseOpts, Hierarchy, LoadOpts},
     CoreEvent,
     Info,
     LogLevel,
@@ -18,10 +19,13 @@ use roon_api::{
 
 use super::{IoEvent, QueueMode};
 
+const TUI_BROWSE: &str = "tui_browse";
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct Settings {
     zone_id: Option<String>,
-    queue_mode: HashMap<String, QueueMode>,
+    profile: Option<String>,
+    queue_mode: Option<HashMap<String, QueueMode>>,
 }
 
 pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
@@ -52,8 +56,9 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
         let mut transport = None;
         let mut zone_map = HashMap::new();
         let mut pause_on_track_end = false;
+        let mut browse_paths: HashMap<String, Vec<&str>> = HashMap::new();
         let mut opts = BrowseOpts {
-            multi_session_key: Some("tui_browse".to_owned()),
+            multi_session_key: Some(TUI_BROWSE.to_owned()),
             ..Default::default()
         };
 
@@ -151,9 +156,25 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                                         to_app.send(IoEvent::ZoneSeek(seek)).await.unwrap();
                                     }
                                 }
+
+                                for seek in seeks {
+                                    if seek.queue_time_remaining == 0 {
+                                        let zone = zone_map.get(&seek.zone_id);
+
+                                        if let Some(browse_path) = handle_queue_mode(settings.queue_mode.as_ref(), zone, browse.as_ref()).await {
+                                            browse_paths.insert(seek.zone_id, browse_path);
+                                        }
+                                    }
+                                };
+                            }
+                            Parsed::Queue(queue_items) => {
+                                to_app.send(IoEvent::QueueList(queue_items)).await.unwrap();
+                            },
+                            Parsed::QueueChanges(queue_changes) => {
+                                to_app.send(IoEvent::QueueListChanges(queue_changes)).await.unwrap();
                             }
                             _ => {
-                                handle_parsed_response(browse.as_ref(), &to_app, parsed).await;
+                                handle_browse_response(browse.as_ref(), &mut browse_paths, &to_app, parsed).await;
                             }
                         }
                     }
@@ -277,43 +298,64 @@ fn handle_pause_on_track_end_req(settings: &Settings, zone_map: &HashMap<String,
     Some(zone.state == State::Playing && now_playing_length > 0)
 }
 
-async fn handle_parsed_response(
+async fn handle_browse_response(
     browse: Option<&Browse>,
+    browse_paths: &mut HashMap<String, Vec<&str>>,
     to_app: &mpsc::Sender<IoEvent>,
     parsed: Parsed,
-) {
-    if let Some(browse) = browse {
-        match parsed {
-            Parsed::BrowseResult(result, multi_session_key) => {
-                match result.action {
-                    Action::List => {
-                        if let Some(list) = result.list {
-                            to_app.send(IoEvent::BrowseTitle(list.title)).await.unwrap();
+) -> Option<()> {
+    let browse = browse?;
 
-                            let offset = list.display_offset.unwrap_or_default();
-                            let opts = LoadOpts {
-                                count: Some(100),
-                                offset,
-                                set_display_offset: offset,
-                                multi_session_key,
-                                ..Default::default()
-                            };
+    match parsed {
+        Parsed::BrowseResult(result, multi_session_key) => {
+            match result.action {
+                Action::List => {
+                    let list = result.list?;
+                    let multi_session_str = multi_session_key.as_deref()?;
+                    let mut opts = LoadOpts::default();
 
-                            browse.load(&opts).await;
+                    if multi_session_str == TUI_BROWSE {
+                        let offset = list.display_offset.unwrap_or_default();
+
+                        opts.offset = offset;
+                        opts.set_display_offset = offset;
+
+                        to_app.send(IoEvent::BrowseTitle(list.title)).await.unwrap();
+                    } else if list.title == "Albums" {
+                        let mut rng = rand::thread_rng();
+                        let offset = rng.gen_range(0..list.count);
+
+                        opts.hierarchy = Hierarchy::Albums;
+                        opts.count = Some(1);
+                        opts.offset = offset;
+                        opts.set_display_offset = offset;
+                    } else {
+                        let browse_path = browse_paths.get(multi_session_str)?;
+
+                        if !browse_path.is_empty() {
+                            opts.hierarchy = Hierarchy::Albums;
                         }
                     }
-                    Action::Message => {
-                        let is_error = result.is_error.unwrap();
-                        let message = result.message.unwrap();
 
-                        if is_error && message == "Zone is not configured" {
-                            to_app.send(IoEvent::ZoneSelect).await.unwrap();
-                        }
-                    }
-                    _ => (),
+                    opts.multi_session_key = multi_session_key;
+
+                    browse.load(&opts).await;
                 }
+                Action::Message => {
+                    let is_error = result.is_error.unwrap();
+                    let message = result.message.unwrap();
+
+                    if is_error && message == "Zone is not configured" {
+                        to_app.send(IoEvent::ZoneSelect).await.unwrap();
+                    }
+                }
+                _ => (),
             }
-            Parsed::LoadResult(result, multi_session_key) => {
+        }
+        Parsed::LoadResult(result, multi_session_key) => {
+            let multi_session_str = multi_session_key.as_deref()?;
+
+            if multi_session_str == TUI_BROWSE {
                 let new_offset = result.offset + result.items.len();
 
                 if new_offset < result.list.count {
@@ -329,26 +371,54 @@ async fn handle_parsed_response(
                 }
 
                 to_app.send(IoEvent::BrowseList(result.offset, result.items)).await.unwrap();
+            } else {
+                let item = result.items.iter().next()?;
+                let browse_path = browse_paths.get_mut(multi_session_str)?;
+
+                if !browse_path.is_empty() {
+                    if result.list.title != "Albums" {
+                        browse_path.pop();
+
+                        if browse_path.is_empty() {
+                            browse_paths.remove(multi_session_str);
+                        }
+                    }
+
+                    let opts = BrowseOpts {
+                        hierarchy: Hierarchy::Albums,
+                        zone_or_output_id: multi_session_key.clone(),
+                        item_key: item.item_key.clone(),
+                        multi_session_key,
+                        ..Default::default()
+                    };
+
+                    browse.browse(&opts).await;
+                }
             }
-            Parsed::Queue(queue_items) => {
-                to_app.send(IoEvent::QueueList(queue_items)).await.unwrap();
-            },
-            Parsed::QueueChanges(queue_changes) => {
-                to_app.send(IoEvent::QueueListChanges(queue_changes)).await.unwrap();
-            }
-            _ => (),
         }
+        _ => (),
     }
+
+    Some(())
 }
 
 fn select_next_queue_mode<'a>(settings: &'a mut Settings) -> Option<&'a QueueMode> {
     let zone_id = settings.zone_id.as_ref()?;
-    let queue_mode = settings.queue_mode.get_mut(zone_id)?;
+    let queue_mode = settings.queue_mode.as_mut()?.get_mut(zone_id)?;
     let index = queue_mode.to_owned() as usize + 1;
-    let seq = vec![
-        QueueMode::Manual,
-        QueueMode::RoonRadio,
-    ];
+    let seq = if settings.profile.is_none() {
+        vec![
+            QueueMode::Manual,
+            QueueMode::RoonRadio,
+        ]
+    } else {
+        vec![
+            QueueMode::Manual,
+            QueueMode::RoonRadio,
+            QueueMode::RandomAlbum,
+            QueueMode::RandomTrack,
+        ]
+    };
 
     *queue_mode = match seq.get(index) {
         None => QueueMode::Manual,
@@ -362,7 +432,7 @@ fn sync_queue_mode<'a>(settings: &'a mut Settings, auto_radio: bool) -> Option<&
     let zone_id = settings.zone_id.as_ref()?;
     let queue_mode = if auto_radio {
         QueueMode::RoonRadio
-    } else if let Some(queue_mode) = settings.queue_mode.get(zone_id) {
+    } else if let Some(queue_mode) = settings.queue_mode.as_ref()?.get(zone_id) {
         if *queue_mode == QueueMode::RoonRadio {
             QueueMode::default()
         } else {
@@ -372,9 +442,37 @@ fn sync_queue_mode<'a>(settings: &'a mut Settings, auto_radio: bool) -> Option<&
         QueueMode::default()
     };
 
-    settings.queue_mode.insert(zone_id.to_owned(), queue_mode);
+    settings.queue_mode.as_mut()?.insert(zone_id.to_owned(), queue_mode);
 
-    settings.queue_mode.get(zone_id)
+    settings.queue_mode.as_ref()?.get(zone_id)
+}
+
+async fn handle_queue_mode(
+    queue_modes: Option<&HashMap<String, QueueMode>>,
+    zone: Option<&Zone>,
+    browse: Option<&Browse>
+) -> Option<Vec<&'static str>> {
+    let zone = zone?;
+    let zone_id = zone.zone_id.as_str();
+    let queue_mode = queue_modes?.get(zone_id)?;
+
+    zone.now_playing.as_ref()?.length?;
+
+    match queue_mode {
+        QueueMode::RandomAlbum => {
+            let opts = BrowseOpts {
+                hierarchy: Hierarchy::Albums,
+                pop_all: true,
+                multi_session_key: Some(zone_id.to_owned()),
+                ..Default::default()
+            };
+
+            browse?.browse(&opts).await;
+
+            Some(vec!["Play Now", "Play Album"])
+        }
+        _ => None,
+    }
 }
 
 async fn mute(
