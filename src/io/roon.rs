@@ -6,7 +6,7 @@ use tokio::{sync::mpsc, select};
 
 use roon_api::{
     info,
-    browse::{Action, Browse, BrowseOpts, Hierarchy, LoadOpts},
+    browse::{Action, Browse, BrowseOpts, LoadOpts},
     CoreEvent,
     Info,
     LogLevel,
@@ -56,7 +56,8 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
         let mut transport = None;
         let mut zone_map = HashMap::new();
         let mut pause_on_track_end = false;
-        let mut browse_paths: HashMap<String, Vec<&str>> = HashMap::new();
+        let mut browse_paths = HashMap::new();
+        let mut profiles = None;
         let mut opts = BrowseOpts {
             multi_session_key: Some(TUI_BROWSE.to_owned()),
             ..Default::default()
@@ -112,6 +113,10 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                                 to_app.send(IoEvent::Zones(zones)).await.unwrap();
 
                                 if let Some(zone_id) = settings.zone_id.as_ref() {
+                                    if let Some(browse_path) = browse_profile(zone_id, browse.as_ref()).await {
+                                        browse_paths.insert(zone_id.to_owned(), browse_path);
+                                    }
+
                                     if let Some(zone) = zone_map.get(zone_id) {
                                         if let Some(queue_mode) = sync_queue_mode(&mut settings, zone.settings.auto_radio) {
                                             to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
@@ -173,9 +178,13 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                             Parsed::QueueChanges(queue_changes) => {
                                 to_app.send(IoEvent::QueueListChanges(queue_changes)).await.unwrap();
                             }
-                            _ => {
-                                handle_browse_response(browse.as_ref(), &mut browse_paths, &to_app, parsed).await;
-                            }
+                            _ => profiles = handle_browse_response(
+                                browse.as_ref(),
+                                &mut browse_paths,
+                                &to_app,
+                                parsed,
+                                settings.profile.as_deref(),
+                            ).await,
                         }
                     }
                 }
@@ -188,6 +197,21 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
 
                     match event {
                         IoEvent::BrowseSelected(item_key) => {
+                            let profile = get_profile_name(profiles.as_ref(), item_key.as_deref());
+
+                            if profile.is_some() {
+                                if let Some(zone_id) = settings.zone_id.as_ref() {
+                                    settings.profile = profile;
+
+                                    let settings = settings.serialize(serde_json::value::Serializer).unwrap();
+                                    RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
+
+                                    if let Some(browse_path) = browse_profile(zone_id, browse.as_ref()).await {
+                                        browse_paths.insert(zone_id.to_owned(), browse_path);
+                                    }
+                                }
+                            }
+
                             if let Some(browse) = browse.as_ref() {
                                 opts.item_key = item_key;
                                 opts.zone_or_output_id = settings.zone_id.to_owned();
@@ -254,8 +278,6 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
 
                                 let zone = zone_map.get(&zone_id);
 
-                                settings.zone_id = Some(zone_id);
-
                                 if let Some(zone) = zone {
                                     if let Some(queue_mode) = sync_queue_mode(&mut settings, zone.settings.auto_radio) {
                                         to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
@@ -264,8 +286,13 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                                     to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
                                 }
 
-                                let settings = settings.serialize(serde_json::value::Serializer).unwrap();
+                                if let Some(browse_path) = browse_profile(&zone_id, browse.as_ref()).await {
+                                    browse_paths.insert(zone_id.to_owned(), browse_path);
+                                }
 
+                                settings.zone_id = Some(zone_id);
+
+                                let settings = settings.serialize(serde_json::value::Serializer).unwrap();
                                 RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
                             }
                         }
@@ -298,12 +325,36 @@ fn handle_pause_on_track_end_req(settings: &Settings, zone_map: &HashMap<String,
     Some(zone.state == State::Playing && now_playing_length > 0)
 }
 
+fn get_profile_name(profiles: Option<&Vec<(String, String)>>, item_key: Option<&str>) -> Option<String> {
+    let profiles = profiles?;
+
+    profiles.iter().find_map(|(key, title)| {
+        if key == item_key? {
+            Some(title.to_owned())
+        } else {
+            None
+        }
+    })
+}
+
+async fn browse_profile(zone_id: &str, browse: Option<&Browse>) -> Option<Vec<&'static str>> {
+    let opts = BrowseOpts {
+        multi_session_key: Some(zone_id.to_owned()),
+        ..Default::default()
+    };
+
+    browse?.browse(&opts).await;
+
+    Some(vec!["", "Profile", "Settings"])
+}
+
 async fn handle_browse_response(
     browse: Option<&Browse>,
     browse_paths: &mut HashMap<String, Vec<&str>>,
     to_app: &mpsc::Sender<IoEvent>,
     parsed: Parsed,
-) -> Option<()> {
+    profile: Option<&str>,
+) -> Option<Vec<(String, String)>> {
     let browse = browse?;
 
     match parsed {
@@ -321,20 +372,13 @@ async fn handle_browse_response(
                         opts.set_display_offset = offset;
 
                         to_app.send(IoEvent::BrowseTitle(list.title)).await.unwrap();
-                    } else if list.title == "Albums" {
+                    } else if list.title == "Albums" || list.title == "Tracks" {
                         let mut rng = rand::thread_rng();
                         let offset = rng.gen_range(0..list.count);
 
-                        opts.hierarchy = Hierarchy::Albums;
                         opts.count = Some(1);
                         opts.offset = offset;
                         opts.set_display_offset = offset;
-                    } else {
-                        let browse_path = browse_paths.get(multi_session_str)?;
-
-                        if !browse_path.is_empty() {
-                            opts.hierarchy = Hierarchy::Albums;
-                        }
                     }
 
                     opts.multi_session_key = multi_session_key;
@@ -351,6 +395,8 @@ async fn handle_browse_response(
                 }
                 _ => (),
             }
+
+            None
         }
         Parsed::LoadResult(result, multi_session_key) => {
             let multi_session_str = multi_session_key.as_deref()?;
@@ -370,36 +416,49 @@ async fn handle_browse_response(
                     browse.load(&opts).await;
                 }
 
+                let profiles = if result.list.title == "Profile" {
+                    Some(result.items.iter().filter_map(|item| {
+                        Some((item.item_key.as_ref()?.clone(), item.title.clone()))
+                    }).collect())
+                } else {
+                    None
+                };
+
                 to_app.send(IoEvent::BrowseList(result.offset, result.items)).await.unwrap();
+
+                profiles
             } else {
-                let item = result.items.iter().next()?;
                 let browse_path = browse_paths.get_mut(multi_session_str)?;
+                let step = browse_path.pop()?;
 
-                if !browse_path.is_empty() {
-                    if result.list.title != "Albums" {
-                        browse_path.pop();
-
-                        if browse_path.is_empty() {
-                            browse_paths.remove(multi_session_str);
-                        }
-                    }
-
-                    let opts = BrowseOpts {
-                        hierarchy: Hierarchy::Albums,
-                        zone_or_output_id: multi_session_key.clone(),
-                        item_key: item.item_key.clone(),
-                        multi_session_key,
-                        ..Default::default()
-                    };
-
-                    browse.browse(&opts).await;
+                if browse_path.is_empty() {
+                    browse_paths.remove(multi_session_str);
                 }
+
+                let item = if step.is_empty() {
+                    if result.list.title == "Profile" {
+                        result.items.iter().find_map(|item| if item.title == profile? {Some(item)} else {None})
+                    } else {
+                        result.items.iter().next()
+                    }
+                } else {
+                    result.items.iter().find_map(|item| if item.title == step {Some(item)} else {None})
+                };
+
+                let opts = BrowseOpts {
+                    zone_or_output_id: multi_session_key.clone(),
+                    item_key: item?.item_key.clone(),
+                    multi_session_key,
+                    ..Default::default()
+                };
+
+                browse.browse(&opts).await;
+
+                None
             }
         }
-        _ => (),
+        _ => None,
     }
-
-    Some(())
 }
 
 fn select_next_queue_mode<'a>(settings: &'a mut Settings) -> Option<&'a QueueMode> {
@@ -461,7 +520,6 @@ async fn handle_queue_mode(
     match queue_mode {
         QueueMode::RandomAlbum => {
             let opts = BrowseOpts {
-                hierarchy: Hierarchy::Albums,
                 pop_all: true,
                 multi_session_key: Some(zone_id.to_owned()),
                 ..Default::default()
@@ -469,7 +527,18 @@ async fn handle_queue_mode(
 
             browse?.browse(&opts).await;
 
-            Some(vec!["Play Now", "Play Album"])
+            Some(vec!["Play Now", "Play Album", "", "Albums", "Library"])
+        }
+        QueueMode::RandomTrack => {
+            let opts = BrowseOpts {
+                pop_all: true,
+                multi_session_key: Some(zone_id.to_owned()),
+                ..Default::default()
+            };
+
+            browse?.browse(&opts).await;
+
+            Some(vec!["Play Now", "", "Tracks", "Library"])
         }
         _ => None,
     }
