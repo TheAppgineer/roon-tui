@@ -14,7 +14,7 @@ use roon_api::{
     RoonApi,
     Services,
     Svc,
-    transport::{Control, State, Transport, volume, Zone},
+    transport::{Control, QueueItem, Seek, State, Transport, volume, Zone},
 };
 
 use super::{IoEvent, QueueMode};
@@ -58,6 +58,8 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
         let mut pause_on_track_end = false;
         let mut browse_paths = HashMap::new();
         let mut profiles = None;
+        let mut queue_end = None;
+        let mut seek_seconds = None;
         let mut opts = BrowseOpts {
             multi_session_key: Some(TUI_BROWSE.to_owned()),
             ..Default::default()
@@ -112,22 +114,26 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
 
                                 to_app.send(IoEvent::Zones(zones)).await.unwrap();
 
-                                if let Some(zone_id) = settings.zone_id.as_ref() {
+                                if let Some(zone_id) = settings.zone_id.as_deref() {
                                     if let Some(browse_path) = browse_profile(zone_id, browse.as_ref()).await {
                                         browse_paths.insert(zone_id.to_owned(), browse_path);
                                     }
 
                                     if let Some(zone) = zone_map.get(zone_id) {
+                                        if zone.state != State::Playing {
+                                            if pause_on_track_end {
+                                                pause_on_track_end = false;
+                                                to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
+                                            }
+                                        } else {
+                                            seek_to_end(transport.as_ref(), Some(zone_id), seek_seconds.take()).await;
+                                        }
+
                                         if let Some(queue_mode) = sync_queue_mode(&mut settings, zone.settings.auto_radio) {
                                             to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
 
                                             let settings = settings.serialize(serde_json::value::Serializer).unwrap();
                                             RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
-                                        }
-
-                                        if zone.state != State::Playing && pause_on_track_end {
-                                            pause_on_track_end = false;
-                                            to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
                                         }
 
                                         to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
@@ -249,12 +255,16 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                                 browse.browse(&opts).await;
                             }
                         }
+                        IoEvent::QueueListLast(item) => queue_end = item,
                         IoEvent::QueueSelected(queue_item_id) => {
                             if let Some(transport) = transport.as_ref() {
                                 if let Some(zone_id) = settings.zone_id.as_ref() {
                                     transport.play_from_here(zone_id, queue_item_id).await;
                                 }
                             }
+                        }
+                        IoEvent::QueueClear => {
+                            seek_seconds = play_queue_end(transport.as_ref(), settings.zone_id.as_deref(), queue_end.as_ref()).await;
                         }
                         IoEvent::QueueModeNext => {
                             if let Some(queue_mode) = select_next_queue_mode(&mut settings) {
@@ -597,4 +607,27 @@ async fn set_roon_radio(
 
     settings.auto_radio = auto_radio;
     transport?.change_settings(zone_id?, settings).await
+}
+
+async fn play_queue_end(
+    transport: Option<&Transport>,
+    zone_id: Option<&str>,
+    queue_end: Option<&QueueItem>,
+) -> Option<i32> {
+    let transport = transport?;
+    let queue_end = queue_end?;
+
+    transport.play_from_here(zone_id?, queue_end.queue_item_id).await;
+
+    Some(queue_end.length as i32)
+}
+
+async fn seek_to_end(
+    transport: Option<&Transport>,
+    zone_id: Option<&str>,
+    seek_seconds: Option<i32>,
+) -> Option<()> {
+    transport?.seek(zone_id?, &Seek::Absolute, seek_seconds?).await;
+
+    Some(())
 }

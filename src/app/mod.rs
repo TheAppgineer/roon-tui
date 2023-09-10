@@ -109,10 +109,15 @@ impl App {
                     }
                 }
                 IoEvent::QueueList(queue_list) => {
+                    self.to_roon.send(IoEvent::QueueListLast(queue_list.last().cloned())).await.unwrap();
                     self.queue.items = Some(queue_list);
                 }
                 IoEvent::QueueListChanges(changes) => {
                     self.apply_queue_changes(changes);
+
+                    if let Some(items) = self.queue.items.as_ref() {
+                        self.to_roon.send(IoEvent::QueueListLast(items.last().cloned())).await.unwrap();
+                    }
                 }
                 IoEvent::QueueModeCurrent(queue_mode) => {
                     let queue_mode = match queue_mode {
@@ -447,6 +452,7 @@ impl App {
                 }
                 KeyModifiers::CONTROL => {
                     match key.code {
+                        KeyCode::Delete => self.to_roon.send(IoEvent::QueueClear).await.unwrap(),
                         KeyCode::Char('e') => self.to_roon.send(IoEvent::PauseOnTrackEndReq).await.unwrap(),
                         KeyCode::Char('p') => self.to_roon.send(IoEvent::Control(Control::PlayPause)).await.unwrap(),
                         KeyCode::Char('q') => self.to_roon.send(IoEvent::QueueModeNext).await.unwrap(),
