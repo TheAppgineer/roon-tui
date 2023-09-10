@@ -25,7 +25,7 @@ const TUI_BROWSE: &str = "tui_browse";
 struct Settings {
     zone_id: Option<String>,
     profile: Option<String>,
-    queue_mode: Option<HashMap<String, QueueMode>>,
+    queue_modes: Option<HashMap<String, QueueMode>>,
 }
 
 pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
@@ -172,7 +172,7 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                                     if seek.queue_time_remaining == 0 {
                                         let zone = zone_map.get(&seek.zone_id);
 
-                                        if let Some(browse_path) = handle_queue_mode(settings.queue_mode.as_ref(), zone, browse.as_ref()).await {
+                                        if let Some(browse_path) = handle_queue_mode(settings.queue_modes.as_ref(), zone, browse.as_ref()).await {
                                             browse_paths.insert(seek.zone_id, browse_path);
                                         }
                                     }
@@ -313,7 +313,23 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                             change_volume(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), steps).await;
                         }
                         IoEvent::Control(how) => {
-                            control(transport.as_ref(), settings.zone_id.as_deref(), &how).await;
+                            if let Some(zone_id) = settings.zone_id.as_deref() {
+                                let zone_option = zone_map.get(zone_id);
+
+                                if let Some(zone) = zone_option {
+                                    if zone.now_playing.is_some() {
+                                        control(transport.as_ref(), settings.zone_id.as_deref(), &how).await;
+                                    } else if how == Control::PlayPause {
+                                        if let Some(browse_path) = handle_queue_mode(
+                                            settings.queue_modes.as_ref(),
+                                            zone_option,
+                                            browse.as_ref()
+                                        ).await {
+                                            browse_paths.insert(zone_id.to_owned(), browse_path);
+                                        }
+                                    }
+                                }
+                            }
                         }
                         IoEvent::PauseOnTrackEndReq => {
                             pause_on_track_end = handle_pause_on_track_end_req(&settings, &zone_map).unwrap_or_default();
@@ -473,7 +489,7 @@ async fn handle_browse_response(
 
 fn select_next_queue_mode<'a>(settings: &'a mut Settings) -> Option<&'a QueueMode> {
     let zone_id = settings.zone_id.as_ref()?;
-    let queue_mode = settings.queue_mode.as_mut()?.get_mut(zone_id)?;
+    let queue_mode = settings.queue_modes.as_mut()?.get_mut(zone_id)?;
     let index = queue_mode.to_owned() as usize + 1;
     let seq = if settings.profile.is_none() {
         vec![
@@ -501,7 +517,7 @@ fn sync_queue_mode<'a>(settings: &'a mut Settings, auto_radio: bool) -> Option<&
     let zone_id = settings.zone_id.as_ref()?;
     let queue_mode = if auto_radio {
         QueueMode::RoonRadio
-    } else if let Some(queue_mode) = settings.queue_mode.as_ref()?.get(zone_id) {
+    } else if let Some(queue_mode) = settings.queue_modes.as_ref()?.get(zone_id) {
         if *queue_mode == QueueMode::RoonRadio {
             QueueMode::default()
         } else {
@@ -511,9 +527,9 @@ fn sync_queue_mode<'a>(settings: &'a mut Settings, auto_radio: bool) -> Option<&
         QueueMode::default()
     };
 
-    settings.queue_mode.as_mut()?.insert(zone_id.to_owned(), queue_mode);
+    settings.queue_modes.as_mut()?.insert(zone_id.to_owned(), queue_mode);
 
-    settings.queue_mode.as_ref()?.get(zone_id)
+    settings.queue_modes.as_ref()?.get(zone_id)
 }
 
 async fn handle_queue_mode(
@@ -525,7 +541,9 @@ async fn handle_queue_mode(
     let zone_id = zone.zone_id.as_str();
     let queue_mode = queue_modes?.get(zone_id)?;
 
-    zone.now_playing.as_ref()?.length?;
+    if let Some(now_playing) = zone.now_playing.as_ref() {
+        now_playing.length?;
+    }
 
     match queue_mode {
         QueueMode::RandomAlbum => {
