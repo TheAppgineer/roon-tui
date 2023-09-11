@@ -288,6 +288,13 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
 
                                 let zone = zone_map.get(&zone_id);
 
+                                if let Some(browse_path) = browse_profile(&zone_id, browse.as_ref()).await {
+                                    browse_paths.insert(zone_id.to_owned(), browse_path);
+                                }
+
+                                // Store the zone_id in settings before it is used again in sync_queue_mode
+                                settings.zone_id = Some(zone_id);
+
                                 if let Some(zone) = zone {
                                     if let Some(queue_mode) = sync_queue_mode(&mut settings, zone.settings.auto_radio) {
                                         to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
@@ -295,12 +302,6 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
 
                                     to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
                                 }
-
-                                if let Some(browse_path) = browse_profile(&zone_id, browse.as_ref()).await {
-                                    browse_paths.insert(zone_id.to_owned(), browse_path);
-                                }
-
-                                settings.zone_id = Some(zone_id);
 
                                 let settings = settings.serialize(serde_json::value::Serializer).unwrap();
                                 RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
@@ -488,29 +489,42 @@ async fn handle_browse_response(
 }
 
 fn select_next_queue_mode<'a>(settings: &'a mut Settings) -> Option<&'a QueueMode> {
-    let zone_id = settings.zone_id.as_ref()?;
-    let queue_mode = settings.queue_modes.as_mut()?.get_mut(zone_id)?;
-    let index = queue_mode.to_owned() as usize + 1;
-    let seq = if settings.profile.is_none() {
-        vec![
-            QueueMode::Manual,
-            QueueMode::RoonRadio,
-        ]
+    let zone_id = settings.zone_id.as_deref()?;
+
+    if settings.queue_modes.is_none() {
+        settings.queue_modes = Some(HashMap::new());
+    }
+
+    let queue_modes = settings.queue_modes.as_mut()?;
+
+    if queue_modes.get(zone_id).is_none() {
+        queue_modes.insert(zone_id.to_owned(), QueueMode::Manual);
+
+        Some(&QueueMode::Manual)
     } else {
-        vec![
-            QueueMode::Manual,
-            QueueMode::RoonRadio,
-            QueueMode::RandomAlbum,
-            QueueMode::RandomTrack,
-        ]
-    };
+        let queue_mode = queue_modes.get_mut(zone_id)?;
+        let index = queue_mode.to_owned() as usize + 1;
+        let seq = if settings.profile.is_none() {
+            vec![
+                QueueMode::Manual,
+                QueueMode::RoonRadio,
+            ]
+        } else {
+            vec![
+                QueueMode::Manual,
+                QueueMode::RoonRadio,
+                QueueMode::RandomAlbum,
+                QueueMode::RandomTrack,
+            ]
+        };
 
-    *queue_mode = match seq.get(index) {
-        None => QueueMode::Manual,
-        Some(queue_mode) => queue_mode.to_owned(),
-    };
+        *queue_mode = match seq.get(index) {
+            None => QueueMode::Manual,
+            Some(queue_mode) => queue_mode.to_owned(),
+        };
 
-    Some(queue_mode)
+        Some(queue_mode)
+    }
 }
 
 fn sync_queue_mode<'a>(settings: &'a mut Settings, auto_radio: bool) -> Option<&'a QueueMode> {
