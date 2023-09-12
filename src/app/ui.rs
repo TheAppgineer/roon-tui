@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Span, Line},
-    widgets::{block::{self, Block, Position, Title}, BorderType, Borders, Clear, Gauge, List, ListItem, Padding, Paragraph},
+    widgets::{block::{self, Block, Position, Title}, BorderType, Borders, Clear, Gauge, HighlightSpacing, List, ListItem, Padding, Paragraph},
 };
 use roon_api::transport::{State, Zone, Repeat, volume::Scale};
 
@@ -107,22 +107,14 @@ where
 
         // Create a List from all list items and highlight the currently selected one
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .padding(Padding {
-                        left: if app.browse.is_selected() {0} else {3},
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                    })
-            )
+            .block(Block::default().borders(Borders::ALL))
             .highlight_style(
                 Style::default()
                     .bg(ROON_BRAND_COLOR)
                     .add_modifier(Modifier::BOLD)
             )
-            .highlight_symbol(HIGHLIGHT_SYMBOL);
+            .highlight_symbol(HIGHLIGHT_SYMBOL)
+            .highlight_spacing(HighlightSpacing::Always);
 
         // We can now render the item list
         frame.render_stateful_widget(list, area, &mut app.browse.state);
@@ -215,22 +207,14 @@ where
 
         // Create a List from all list items and highlight the currently selected one
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .padding(Padding {
-                        left: if app.queue.is_selected() {0} else {3},
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                    })
-            )
+            .block(Block::default().borders(Borders::ALL))
             .highlight_style(
                 Style::default()
                     .bg(ROON_BRAND_COLOR)
                     .add_modifier(Modifier::BOLD)
             )
-            .highlight_symbol(HIGHLIGHT_SYMBOL);
+            .highlight_symbol(HIGHLIGHT_SYMBOL)
+            .highlight_spacing(HighlightSpacing::Always);
 
         // We can now render the item list
         frame.render_stateful_widget(list, area, &mut app.queue.state);
@@ -575,10 +559,7 @@ where
 
         // Create a List from all list items and highlight the currently selected one
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-            )
+            .block(Block::default().borders(Borders::ALL))
             .highlight_style(
                 Style::default()
                     .bg(ROON_BRAND_COLOR)
