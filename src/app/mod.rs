@@ -113,7 +113,8 @@ impl App {
                     self.queue.items = Some(queue_list);
                 }
                 IoEvent::QueueListChanges(changes) => {
-                    self.apply_queue_changes(changes);
+                    let selected = self.get_queue_select_string();
+                    self.apply_queue_changes(&changes, selected);
 
                     if let Some(items) = self.queue.items.as_ref() {
                         self.to_roon.send(IoEvent::QueueListLast(items.last().cloned())).await.unwrap();
@@ -152,7 +153,14 @@ impl App {
         AppReturn::Continue
     }
 
-    fn apply_queue_changes(&mut self, changes: Vec<QueueChange>) -> Option<()> {
+    fn get_queue_select_string(&self) -> Option<String> {
+        let index = self.queue.state.selected()?;
+        let selected = self.queue.items.as_ref()?.get(index)?.two_line.line1.to_owned();
+
+        Some(selected)
+    }
+
+    fn apply_queue_changes(&mut self, changes: &Vec<QueueChange>, selected: Option<String>) -> Option<()> {
         let queue = self.queue.items.as_mut()?;
 
         for change in changes {
@@ -171,6 +179,12 @@ impl App {
                 }
             }
         }
+
+        if let Some(selected) = selected {
+            let index = queue.iter().position(|item| item.two_line.line1 == selected);
+
+            self.queue.select(index);
+        };
 
         Some(())
     }
@@ -452,10 +466,15 @@ impl App {
                 }
                 KeyModifiers::CONTROL => {
                     match key.code {
+                        KeyCode::Up => self.to_roon.send(IoEvent::ChangeVolume(1)).await.unwrap(),
+                        KeyCode::Down => self.to_roon.send(IoEvent::ChangeVolume(-1)).await.unwrap(),
+                        KeyCode::Left => self.to_roon.send(IoEvent::Control(Control::Previous)).await.unwrap(),
+                        KeyCode::Right => self.to_roon.send(IoEvent::Control(Control::Next)).await.unwrap(),
                         KeyCode::Delete => self.to_roon.send(IoEvent::QueueClear).await.unwrap(),
                         KeyCode::Char('e') => self.to_roon.send(IoEvent::PauseOnTrackEndReq).await.unwrap(),
-                        KeyCode::Char('p') => self.to_roon.send(IoEvent::Control(Control::PlayPause)).await.unwrap(),
+                        KeyCode::Char('p') | KeyCode::Char(' ') => self.to_roon.send(IoEvent::Control(Control::PlayPause)).await.unwrap(),
                         KeyCode::Char('q') => self.to_roon.send(IoEvent::QueueModeNext).await.unwrap(),
+                        KeyCode::Char('a') => self.to_roon.send(IoEvent::QueueModeAppend).await.unwrap(),
                         KeyCode::Char('z') => {
                             if let Some(View::Prompt) = selected_view.as_ref() {
                                 self.restore_view();
