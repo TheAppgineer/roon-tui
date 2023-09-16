@@ -152,13 +152,13 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                                 }
                             }
                             Parsed::ZonesSeek(seeks) => {
-                                if let Some(zone_id) = settings.zone_id.as_ref() {
+                                if let Some(zone_id) = settings.zone_id.as_deref() {
                                     if let Some(index) = seeks.iter().position(|seek| seek.zone_id == *zone_id) {
                                         let seek = seeks[index].to_owned();
 
                                         if let Some(seek_position) = seek.seek_position {
                                             if seek_position == 0 && pause_on_track_end {
-                                                control(transport.as_ref(), settings.zone_id.as_deref(), &Control::Pause).await;
+                                                control(transport.as_ref(), zone_map.get(zone_id), &Control::Pause).await;
                                                 pause_on_track_end = false;
                                                 to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
                                             }
@@ -169,10 +169,15 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                                 }
 
                                 for seek in seeks {
-                                    if seek.queue_time_remaining == 0 {
+                                    if seek.queue_time_remaining >= 0 && seek.queue_time_remaining <= 3 {
                                         let zone = zone_map.get(&seek.zone_id);
 
-                                        if let Some(browse_path) = handle_queue_mode(settings.queue_modes.as_ref(), zone, browse.as_ref()).await {
+                                        if let Some(browse_path) = handle_queue_mode(
+                                            settings.queue_modes.as_ref(),
+                                            zone,
+                                            browse.as_ref(),
+                                            true,
+                                        ).await {
                                             browse_paths.insert(seek.zone_id, browse_path);
                                         }
                                     }
@@ -281,6 +286,20 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
                                 RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
                             }
                         }
+                        IoEvent::QueueModeAppend => {
+                            if let Some(zone_id) = settings.zone_id.as_deref() {
+                                let zone = zone_map.get(zone_id);
+
+                                if let Some(browse_path) = handle_queue_mode(
+                                    settings.queue_modes.as_ref(),
+                                    zone,
+                                    browse.as_ref(),
+                                    false,
+                                ).await {
+                                    browse_paths.insert(zone_id.to_owned(), browse_path);
+                                }
+                            }
+                        }
                         IoEvent::ZoneSelected(zone_id) => {
                             if let Some(transport) = transport.as_ref() {
                                 transport.unsubscribe_queue().await;
@@ -319,12 +338,13 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
 
                                 if let Some(zone) = zone_option {
                                     if zone.now_playing.is_some() {
-                                        control(transport.as_ref(), settings.zone_id.as_deref(), &how).await;
+                                        control(transport.as_ref(), zone_option, &how).await;
                                     } else if how == Control::PlayPause {
                                         if let Some(browse_path) = handle_queue_mode(
                                             settings.queue_modes.as_ref(),
                                             zone_option,
-                                            browse.as_ref()
+                                            browse.as_ref(),
+                                            true,
                                         ).await {
                                             browse_paths.insert(zone_id.to_owned(), browse_path);
                                         }
@@ -549,15 +569,20 @@ fn sync_queue_mode<'a>(settings: &'a mut Settings, auto_radio: bool) -> Option<&
 async fn handle_queue_mode(
     queue_modes: Option<&HashMap<String, QueueMode>>,
     zone: Option<&Zone>,
-    browse: Option<&Browse>
+    browse: Option<&Browse>,
+    play: bool,
 ) -> Option<Vec<&'static str>> {
     let zone = zone?;
     let zone_id = zone.zone_id.as_str();
     let queue_mode = queue_modes?.get(zone_id)?;
 
-    if let Some(now_playing) = zone.now_playing.as_ref() {
-        now_playing.length?;
+    if play {
+        if let Some(now_playing) = zone.now_playing.as_ref() {
+            now_playing.length?;
+        }
     }
+
+    let play_action = if play {"Play Now"} else {"Queue"};
 
     match queue_mode {
         QueueMode::RandomAlbum => {
@@ -569,7 +594,7 @@ async fn handle_queue_mode(
 
             browse?.browse(&opts).await;
 
-            Some(vec!["Play Now", "Play Album", "", "Albums", "Library"])
+            Some(vec![play_action, "Play Album", "", "Albums", "Library"])
         }
         QueueMode::RandomTrack => {
             let opts = BrowseOpts {
@@ -580,7 +605,7 @@ async fn handle_queue_mode(
 
             browse?.browse(&opts).await;
 
-            Some(vec!["Play Now", "", "Tracks", "Library"])
+            Some(vec![play_action, "", "Tracks", "Library"])
         }
         _ => None,
     }
@@ -623,10 +648,18 @@ async fn change_volume(
 
 async fn control(
     transport: Option<&Transport>,
-    zone_id: Option<&str>,
+    zone: Option<&Zone>,
     how: &Control,
 ) -> Option<usize> {
-    transport?.control(zone_id?, how).await
+    let zone = zone?;
+
+    match how {
+        Control::Next => zone.is_next_allowed.then_some(())?,
+        Control::Previous => zone.is_previous_allowed.then_some(())?,
+        _ => ()
+    }
+
+    transport?.control(&zone.zone_id, how).await
 }
 
 async fn set_roon_radio(

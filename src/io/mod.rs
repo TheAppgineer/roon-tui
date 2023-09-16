@@ -32,6 +32,7 @@ pub enum IoEvent {
     QueueSelected(u32),
     QueueClear,
     QueueModeNext,
+    QueueModeAppend,
     QueueModeCurrent(QueueMode),
     Zones(Vec<(String, String)>),
     ZoneSelect,
