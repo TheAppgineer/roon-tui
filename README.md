@@ -38,6 +38,27 @@ Some important remarks:
 * Only supports ASCII characters as input, i.e., no unicode input
 * Any unicode characters in items are converted to closest ASCII match before matching takes place
 
+### Queue Modes
+Queue Modes are used to add something new to the Queue when it runs out of music. Every Roon user is familiar with these two modes:
+#### Manual
+In the Manual Queue Mode playback stops when the queue runs out. New music has to be added manually by browsing the library.
+#### Roon Radio
+In the Roon Radio Queue Mode Roon takes care of adding a track to the Queue based on the last track played and its algorithms.
+
+_Roon-TUI provides two additional Queue Modes:_
+#### Random Album
+In the Random Album Queue Mode a random album from the library is added to the queue. This is for those who prefer to listen to whole albums and like to re-discover their library.
+#### Random Track
+In the Random Track Queue Mode a random track from the library is added to the queue. This is for those who like to re-discover their library.
+#### Append before running out
+In the Random Album and Random Track mode new entries can be added to the Queue by using `Ctrl-a`. This can be used to fill-up the queue in advance, or to get something else if the previous addition is not to your liking.
+
+#### Remarks
+* Before the Random Album and Random Track mode become available a profile has to be selected in the Browse View using Settings -> Profile. On behalf of the selected profile tracks will be added to the queue.
+* It is important to note that for the Random Album and Random Track mode to work Roon TUI has to be running.
+* Queue Modes can be configured independently per zone.
+* If Roon Radio is activated for a zone via a Roon Remote then the Queue Mode of that zones falls back to Roon Radio. This is because the Random Album and Random Track modes are not visible on the Roon Remote.
+
 ## Key Bindings
 ### Global (useable in all views)
 |||
@@ -45,8 +66,14 @@ Some important remarks:
 |Tab|Switch between views
 |Shift-Tab|Reverse switch between views
 |Ctrl-z|Open zone selector
-|Ctrl-p|Play / Pause
+|Ctrl-Space, Ctrl-p|Play / Pause
 |Ctrl-e|Pause at End of Track
+|Ctrl-&uarr;|Volume up
+|Ctrl-&darr;|Volume down
+|Ctrl-&rarr;|Next track
+|Ctrl-&larr;|Previous track
+|Ctrl-q|Toggle through Queue Modes
+|Ctrl-a|Append tracks according Queue Mode
 |Ctrl-c|Quit
 ### Common list controls
 |||
@@ -75,8 +102,8 @@ Some important remarks:
 |---|---|
 |m|Mute
 |u|Unmute
-|+|Increase volume
-|-|Decrease volume
+|+|Volume up
+|-|Volume down
 ### Search Popup
 |||
 |---|---|
