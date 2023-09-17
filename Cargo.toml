@@ -1,6 +1,6 @@
 [package]
 name = "roon-tui"
-version = "0.0.5"
+version = "0.0.6"
 authors = ["The Appgineer <theappgineer@gmail.com>"]
 edition = "2021"
 license-file = "LICENSE"
@@ -10,14 +10,15 @@ publish = false
 
 [dependencies]
 log = "0.4"
-ratatui = { version = "0.22.0", features = ["crossterm"], default-features = false }
+ratatui = { version = "0.23.0", features = ["crossterm"], default-features = false }
 crossterm = "0.27.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.24.1", features = ["macros", "rt-multi-thread"] }
 eyre = "0.6"
 any_ascii = "0.3.2"
-roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", tag = "0.0.5", features = ["browse", "transport"] }
+rand = "0.8.5"
+roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", tag = "0.0.6", features = ["browse", "transport"] }
 
 [profile.release]
 strip = true
