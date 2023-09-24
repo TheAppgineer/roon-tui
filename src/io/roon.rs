@@ -1,5 +1,7 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, Ipv4Addr};
+use std::str::FromStr;
 use std::{collections::HashMap, fs, path};
 use std::sync::Arc;
 use tokio::{sync::mpsc, select};
@@ -21,6 +23,12 @@ use super::{IoEvent, QueueMode};
 
 const TUI_BROWSE: &str = "tui_browse";
 
+pub struct Options {
+    pub config: String,
+    pub ip: Option<String>,
+    pub port: String,
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct Settings {
     zone_id: Option<String>,
@@ -28,7 +36,8 @@ struct Settings {
     queue_modes: Option<HashMap<String, QueueMode>>,
 }
 
-pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
+pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
+    let config_path = options.config;
     let path = path::Path::new(&config_path);
     let mut info = info!("com.theappgineer", "Roon TUI");
 
@@ -36,18 +45,28 @@ pub async fn start(config_path: String, to_app: mpsc::Sender<IoEvent>, mut from_
     fs::create_dir_all(path.parent().unwrap()).unwrap();
 
     let mut roon = RoonApi::new(info);
-    let services = vec![
+    let services = Some(vec![
         Services::Browse(Browse::new()),
         Services::Transport(Transport::new()),
-    ];
+    ]);
     let provided: HashMap<String, Svc> = HashMap::new();
     let config_path = Arc::new(config_path);
     let config_path_clone = config_path.clone();
     let get_roon_state = move || {
         RoonApi::load_config(&config_path_clone, "roonstate")
     };
-    let (_, mut core_rx) = roon
-        .start_discovery(Box::new(get_roon_state), provided, Some(services)).await.unwrap();
+    let (_, mut core_rx) = match options.ip {
+        Some(ip) => {
+            let ip = &IpAddr::V4(Ipv4Addr::from_str(&ip).unwrap());
+            let port = &options.port;
+
+            println!("Connecting to server at: {}:{}", ip, port);
+            roon.ws_connect(Box::new(get_roon_state), provided, services, ip, port).await.unwrap()
+        }
+        None => {
+            roon.start_discovery(Box::new(get_roon_state), provided, services).await.unwrap()
+        }
+    };
 
     tokio::spawn(async move {
         const QUEUE_ITEM_COUNT: u32 = 100;
