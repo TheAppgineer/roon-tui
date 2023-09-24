@@ -23,10 +23,33 @@ On first execution the outside border of the UI will be highlighted without any 
 This is Alpha stage software. Instead of using the official [Node.js Roon API](https://github.com/RoonLabs/node-roon-api) provided by Roon Labs this project uses an own developed [Rust port](https://github.com/TheAppgineer/rust-roon-api) of the API.
 
 ## Usage Instructions
-### Specifying Configuration File on Command Line
+### Command Line Options
+There are command line options available to change from the default behavior, an overview is shown by requesting help:
+
+    roon-tui -h
+
+```
+Usage: roon-tui [OPTIONS]
+
+Options:
+  -c, --config <CONFIG>  Path to the config.json file [default: config.json]
+  -i, --ip <IP>          IP address of the Server, disables server discovery
+  -p, --port <PORT>      Port number of the Server [default: 9330]
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+#### Specifying Configuration File
 At startup the default location to get the `config.json` configuration file from is the current working directory. This is troublesome when the executable is placed in a system folder and accessed by using the `PATH` environment variable, because the user account might not have permissions to write to that location. This can be solved by placing the configuration file somewehere in the home folder and specifying its location at startup on the command line. In the below example the file is stored in the users `.config` folder:
 
-    roon-tui ~/.config/roon-tui/config.json
+    roon-tui -c ~/.config/roon-tui/config.json
+
+#### Specifying Server IP and Port
+By default the server discovery functionality provided by the Roon API is used. If this doesn't work (e.g. due to the use of different subnets) the IP address and port number of the server can be specified at the command line.
+
+Use your Roon Remote and select Settings&rarr;Displays from the hamburger menu to find the address and port in the Web display URL.
+
+    roon-tui -i 192.168.1.10 -p 9330
 
 ### Multi-character Jump in Browse View
 After a list of Artists, Albums, etc. is selected, and it is known what to play, a name can be directly typed in the Browse View. The first item that matches the input will be selected. The currently matched characters are displayed in the lower left corner of the view. The Backspace key can be used to revert to previous selections, the Home keys clears the complete input.
