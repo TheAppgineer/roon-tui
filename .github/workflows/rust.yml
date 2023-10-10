@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ['*']
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup | Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup | Apt packages
+        run: sudo apt-get update
+
+      - name: Setup | Rust toolchain
+        uses: dtolnay/rust-toolchain@1.70.0
+        with:
+          components: clippy, rustfmt
+
+      - name: Setup | Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Hygiene | Formatting
+        run: cargo fmt -- --check
+
+      - name: Hygiene | Clippy
+        run: cargo clippy -- -Dclippy::all -Dwarnings
+
+      - name: Hygiene | Build
+        run: cargo build --release

@@ -1,9 +1,12 @@
-use tokio::sync::mpsc;
-use eyre::Result;
 use clap::Parser;
+use eyre::Result;
 use roon_tui::app::App;
-use roon_tui::io::{events::Events, roon::{self, Options}};
+use roon_tui::io::{
+    events::Events,
+    roon::{self, Options},
+};
 use roon_tui::start_ui;
+use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

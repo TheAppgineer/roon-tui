@@ -1,4 +1,4 @@
-use crossterm::event::{self, KeyEventKind, KeyModifiers, KeyCode};
+use crossterm::event::{self, KeyCode, KeyEventKind, KeyModifiers};
 use tokio::sync::mpsc;
 
 use crate::io::IoEvent;

@@ -1,12 +1,15 @@
 use ratatui::{
     backend::Backend,
-    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Line},
-    widgets::{block::{self, Block, Position, Title}, BorderType, Borders, Clear, Gauge, HighlightSpacing, List, ListItem, Padding, Paragraph},
+    text::{Line, Span},
+    widgets::{
+        block::{self, Block, Position, Title},
+        BorderType, Borders, Clear, Gauge, HighlightSpacing, List, ListItem, Padding, Paragraph,
+    },
+    Frame,
 };
-use roon_api::transport::{State, Zone, Repeat, volume::Scale};
+use roon_api::transport::{volume::Scale, Repeat, State, Zone};
 
 use crate::app::{App, View};
 
@@ -30,9 +33,9 @@ where
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, None))
-        .title(Span::styled(title, get_text_view_style(&app, None)))
-        .title(Span::styled(subtitle, get_text_view_style(&app, None)))
+        .border_style(get_border_view_style(app, None))
+        .title(Span::styled(title, get_text_view_style(app, None)))
+        .title(Span::styled(subtitle, get_text_view_style(app, None)))
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Plain);
     frame.render_widget(block, size);
@@ -52,7 +55,7 @@ where
 
     draw_browse_view(frame, top_chunks[0], app);
     draw_queue_view(frame, top_chunks[1], app);
-    draw_now_playing_view(frame, chunks[1], &app);
+    draw_now_playing_view(frame, chunks[1], app);
 
     if let Some(View::Prompt) = app.selected_view {
         draw_prompt_view(frame, top_chunks[0], app);
@@ -67,32 +70,35 @@ fn draw_browse_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
 where
     B: Backend,
 {
-    let browse_title = format!("{}", app.browse.title.as_deref().unwrap_or("Browse"));
-    let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
+    let browse_title = app.browse.title.as_deref().unwrap_or("Browse").to_string();
+    let page_lines = area.height.saturating_sub(2) as usize; // Exclude border
     let view = Some(&View::Browse);
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, view))
-        .title(Span::styled(
-            browse_title,
-            get_text_view_style(&app, view),
-        ));
+        .border_style(get_border_view_style(app, view))
+        .title(Span::styled(browse_title, get_text_view_style(app, view)));
 
-    app.browse.prepare_paging(page_lines, |item| if item.subtitle.is_none() {1} else {2});
+    app.browse.prepare_paging(
+        page_lines,
+        |item| if item.subtitle.is_none() { 1 } else { 2 },
+    );
 
     if let Some(browse_items) = &app.browse.items {
         let secondary_style = if app.get_selected_view().is_some() {
             Style::default().add_modifier(Modifier::ITALIC)
         } else {
-            Style::default().fg(CUSTOM_GRAY).add_modifier(Modifier::ITALIC)
+            Style::default()
+                .fg(CUSTOM_GRAY)
+                .add_modifier(Modifier::ITALIC)
         };
         let items: Vec<ListItem> = browse_items
             .iter()
             .map(|item| {
                 let subtitle = item.subtitle.as_ref().filter(|s| !s.is_empty());
-                let mut lines = vec![
-                    Line::from(Span::styled(&item.title, get_text_view_style(&app, view)))
-                ];
+                let mut lines = vec![Line::from(Span::styled(
+                    &item.title,
+                    get_text_view_style(app, view),
+                ))];
 
                 if let Some(subtitle) = subtitle {
                     lines.push(Line::from(Span::styled(
@@ -111,7 +117,7 @@ where
             .highlight_style(
                 Style::default()
                     .bg(ROON_BRAND_COLOR)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             )
             .highlight_symbol(HIGHLIGHT_SYMBOL)
             .highlight_spacing(HighlightSpacing::Always);
@@ -123,23 +129,20 @@ where
             let len = browse_items.len();
 
             if len > 0 {
-                let progress = format!(
-                    "{}/{}",
-                    app.browse.state.selected().unwrap() + 1,
-                    len
-                );
+                let progress = format!("{}/{}", app.browse.state.selected().unwrap() + 1, len);
 
                 block = block.title(
-                    Title::from(
-                        Span::styled(progress, Style::default().fg(Color::Reset))
-                    ).alignment(Alignment::Right)
+                    Title::from(Span::styled(progress, Style::default().fg(Color::Reset)))
+                        .alignment(Alignment::Right),
                 );
 
                 if !app.input.is_empty() {
                     block = block.title(
-                        Title::from(
-                            Span::styled(app.input.as_str(), Style::default().fg(Color::Reset))
-                        ).position(Position::Bottom)
+                        Title::from(Span::styled(
+                            app.input.as_str(),
+                            Style::default().fg(Color::Reset),
+                        ))
+                        .position(Position::Bottom),
                     );
                 }
             }
@@ -153,33 +156,37 @@ fn draw_queue_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
 where
     B: Backend,
 {
-    let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
+    let page_lines = area.height.saturating_sub(2) as usize; // Exclude border
     let view = Some(&View::Queue);
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, view))
-        .title(Span::styled(
-            "Queue",
-            get_text_view_style(&app, view),
-        ))
+        .border_style(get_border_view_style(app, view))
+        .title(Span::styled("Queue", get_text_view_style(app, view)))
         .title_alignment(Alignment::Right);
 
     if let Some(queue_mode) = app.queue_mode {
         block = block.title(
-            Title::from(
-                Span::styled(queue_mode, Style::default().fg(Color::Reset))
-            ).position(Position::Bottom)
+            Title::from(Span::styled(queue_mode, Style::default().fg(Color::Reset)))
+                .position(Position::Bottom),
         );
     }
 
-    app.queue.prepare_paging(page_lines, |item| if item.two_line.line2.is_empty() {1} else {2});
+    app.queue.prepare_paging(page_lines, |item| {
+        if item.two_line.line2.is_empty() {
+            1
+        } else {
+            2
+        }
+    });
 
     if let Some(queue_items) = &app.queue.items {
         let item_len = area.width.saturating_sub(6) as usize;
         let secondary_style = if app.get_selected_view().is_some() {
             Style::default().add_modifier(Modifier::ITALIC)
         } else {
-            Style::default().fg(CUSTOM_GRAY).add_modifier(Modifier::ITALIC)
+            Style::default()
+                .fg(CUSTOM_GRAY)
+                .add_modifier(Modifier::ITALIC)
         };
         let items: Vec<ListItem> = queue_items
             .iter()
@@ -190,9 +197,10 @@ where
                 let pad_len = item_len.saturating_sub(line1_len + duration.len());
                 let pad: String = (0..pad_len).map(|_| ' ').collect();
                 let line1 = format!("{}{}{}", line1, pad, duration);
-                let mut lines = vec![
-                    Line::from(Span::styled(line1, get_text_view_style(&app, view))),
-                ];
+                let mut lines = vec![Line::from(Span::styled(
+                    line1,
+                    get_text_view_style(app, view),
+                ))];
 
                 if !item.two_line.line2.is_empty() {
                     lines.push(Line::from(Span::styled(
@@ -211,7 +219,7 @@ where
             .highlight_style(
                 Style::default()
                     .bg(ROON_BRAND_COLOR)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             )
             .highlight_symbol(HIGHLIGHT_SYMBOL)
             .highlight_spacing(HighlightSpacing::Always);
@@ -223,26 +231,21 @@ where
             let len = queue_items.len();
 
             if len > 0 {
-                let progress = format!(
-                    "{}/{}",
-                    app.queue.state.selected().unwrap() + 1,
-                    len
-                );
+                let progress = format!("{}/{}", app.queue.state.selected().unwrap() + 1, len);
 
                 block = block.title(
-                    Title::from(
-                        Span::styled(progress, Style::default().fg(Color::Reset))
-                    ).alignment(Alignment::Left)
+                    Title::from(Span::styled(progress, Style::default().fg(Color::Reset)))
+                        .alignment(Alignment::Left),
                 );
             }
-        } else {
-            if let Some(queue_time_remaining) = get_queue_time_remaining(&app) {
-                block = block.title(
-                    Title::from(
-                        Span::styled(queue_time_remaining, Style::default().fg(Color::Reset))
-                    ).alignment(Alignment::Left)
-                );
-            }
+        } else if let Some(queue_time_remaining) = get_queue_time_remaining(app) {
+            block = block.title(
+                Title::from(Span::styled(
+                    queue_time_remaining,
+                    Style::default().fg(Color::Reset),
+                ))
+                .alignment(Alignment::Left),
+            );
         }
     }
 
@@ -284,33 +287,29 @@ where
             Title::from(Span::styled(
                 zone.display_name.as_str(),
                 get_text_view_style(app, view),
-            )).alignment(Alignment::Right)
+            ))
+            .alignment(Alignment::Right),
         );
 
         if let Some(now_playing) = zone.now_playing.as_ref() {
-            let metadata_block = Block::default()
-                .padding(Padding {
-                    left: 4,
-                    right: 0,
-                    top: 1,
-                    bottom: 0,
-                });
+            let metadata_block = Block::default().padding(Padding {
+                left: 4,
+                right: 0,
+                top: 1,
+                bottom: 0,
+            });
             let lines = vec![
                 Line::from(Span::styled(
                     &now_playing.three_line.line1,
                     style.add_modifier(Modifier::BOLD),
                 )),
-                Line::from(Span::styled(
-                    &now_playing.three_line.line2,
-                    style,
-                )),
+                Line::from(Span::styled(&now_playing.three_line.line2, style)),
                 Line::from(Span::styled(
                     &now_playing.three_line.line3,
                     style.add_modifier(Modifier::ITALIC),
                 )),
             ];
-            let text = Paragraph::new(lines)
-                .block(metadata_block);
+            let text = Paragraph::new(lines).block(metadata_block);
 
             frame.render_widget(text, hor_chunks[0]);
 
@@ -330,11 +329,13 @@ where
             let play_state_title = match zone.state {
                 State::Loading => "Loading",
                 State::Paused => "Paused",
-                State::Playing => if app.pause_on_track_end {
-                    "Pause at End of Track"
-                } else {
-                    "Playing"
-                },
+                State::Playing => {
+                    if app.pause_on_track_end {
+                        "Pause at End of Track"
+                    } else {
+                        "Playing"
+                    }
+                }
                 State::Stopped => "Stopped",
             };
 
@@ -344,15 +345,15 @@ where
             ));
         }
 
-        let status_block = Block::default()
-        .padding(Padding {
+        let status_block = Block::default().padding(Padding {
             left: 1,
             right: 2,
             top: 1,
             bottom: 0,
         });
         let text = Paragraph::new(get_status_lines(zone, style))
-            .block(status_block).alignment(Alignment::Right);
+            .block(status_block)
+            .alignment(Alignment::Right);
 
         frame.render_widget(text, hor_chunks[1]);
     }
@@ -372,7 +373,11 @@ where
     B: Backend,
 {
     let elapsed = seek_position? as u32;
-    let progress = if duration > 0 {elapsed * 100 / duration} else {0};
+    let progress = if duration > 0 {
+        elapsed * 100 / duration
+    } else {
+        0
+    };
     let elapsed = get_time_string(elapsed);
     let label = if duration > 0 {
         format!("{} / {}", elapsed, get_time_string(duration))
@@ -478,10 +483,15 @@ fn get_status_lines(zone: &Zone, style: Style) -> Vec<Line> {
 
     vec![
         Line::from(Span::styled(volume, style)),
-        Line::from(Span::styled(format!("{}", repeat_icon), style)),
+        Line::from(Span::styled(repeat_icon.to_string(), style)),
         Line::from(Span::styled(
-            format!("{}", if settings.shuffle {"Shuffle  On"} else {"Shuffle Off"}),
-            style
+            (if settings.shuffle {
+                "Shuffle  On"
+            } else {
+                "Shuffle Off"
+            })
+            .to_string(),
+            style,
         )),
     ]
 }
@@ -498,16 +508,16 @@ where
     let prompt = app.prompt.as_str();
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, view))
-        .title(Span::styled(
-            prompt,
-            get_text_view_style(&app, view),
-        ))
+        .border_style(get_border_view_style(app, view))
+        .title(Span::styled(prompt, get_text_view_style(app, view)))
         .title_alignment(Alignment::Left);
 
-    frame.render_widget(Clear, area);   // This clears out the background
+    frame.render_widget(Clear, area); // This clears out the background
 
-    let input = Line::from(Span::styled(app.input.as_str(), Style::default().fg(Color::Reset)));
+    let input = Line::from(Span::styled(
+        app.input.as_str(),
+        Style::default().fg(Color::Reset),
+    ));
     let input = Paragraph::new(input)
         .style(Style::default().fg(ROON_BRAND_COLOR))
         .block(block);
@@ -532,17 +542,14 @@ where
     let view = Some(&View::Zones);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, view))
-        .title(Span::styled(
-            "Zones",
-            get_text_view_style(&app, view),
-        ))
+        .border_style(get_border_view_style(app, view))
+        .title(Span::styled("Zones", get_text_view_style(app, view)))
         .title_alignment(Alignment::Left);
 
     let area = bottom_right_rect(50, 50, area);
-    let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
+    let page_lines = area.height.saturating_sub(2) as usize; // Exclude border
 
-    frame.render_widget(Clear, area);   // This clears out the background
+    frame.render_widget(Clear, area); // This clears out the background
 
     app.zones.prepare_paging(page_lines, |_| 1);
 
@@ -550,9 +557,7 @@ where
         let items: Vec<ListItem> = zones
             .iter()
             .map(|(_, name)| {
-                let line = Span::styled(
-                    name,
-                    get_text_view_style(&app, view));
+                let line = Span::styled(name, get_text_view_style(app, view));
                 ListItem::new(Line::from(line)).style(Style::default())
             })
             .collect();
@@ -563,7 +568,7 @@ where
             .highlight_style(
                 Style::default()
                     .bg(ROON_BRAND_COLOR)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             )
             .highlight_symbol(HIGHLIGHT_SYMBOL);
 
@@ -631,13 +636,7 @@ fn get_gauge_view_style(app: &App, view: Option<&View>) -> Style {
 fn upper_bar(rect: Rect) -> Rect {
     Layout::default()
         .direction(Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Length(3),
-                Constraint::Min(3),
-            ]
-            .as_ref(),
-        )
+        .constraints([Constraint::Length(3), Constraint::Min(3)].as_ref())
         .split(rect)[0]
 }
 

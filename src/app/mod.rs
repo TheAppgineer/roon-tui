@@ -2,15 +2,15 @@ use any_ascii::any_ascii;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use roon_api::{
     browse,
-    transport::{Control, QueueItem, QueueOperation, QueueChange, Zone, ZoneSeek, volume}
+    transport::{volume, Control, QueueChange, QueueItem, QueueOperation, Zone, ZoneSeek},
 };
 use tokio::sync::mpsc;
 
-use crate::io::{IoEvent, QueueMode};
 use crate::app::stateful_list::StatefulList;
+use crate::io::{IoEvent, QueueMode};
 
-pub mod ui;
 pub mod stateful_list;
+pub mod ui;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AppReturn {
@@ -109,7 +109,10 @@ impl App {
                     }
                 }
                 IoEvent::QueueList(queue_list) => {
-                    self.to_roon.send(IoEvent::QueueListLast(queue_list.last().cloned())).await.unwrap();
+                    self.to_roon
+                        .send(IoEvent::QueueListLast(queue_list.last().cloned()))
+                        .await
+                        .unwrap();
                     self.queue.items = Some(queue_list);
                 }
                 IoEvent::QueueListChanges(changes) => {
@@ -117,7 +120,10 @@ impl App {
                     self.apply_queue_changes(&changes, selected);
 
                     if let Some(items) = self.queue.items.as_ref() {
-                        self.to_roon.send(IoEvent::QueueListLast(items.last().cloned())).await.unwrap();
+                        self.to_roon
+                            .send(IoEvent::QueueListLast(items.last().cloned()))
+                            .await
+                            .unwrap();
                     }
                 }
                 IoEvent::QueueModeCurrent(queue_mode) => {
@@ -140,13 +146,18 @@ impl App {
                     self.selected_zone = Some(zone);
 
                     if self.pending_item_key.is_some() {
-                        self.to_roon.send(IoEvent::BrowseSelected(self.pending_item_key.take())).await.unwrap();
+                        self.to_roon
+                            .send(IoEvent::BrowseSelected(self.pending_item_key.take()))
+                            .await
+                            .unwrap();
                     }
                 }
                 IoEvent::ZoneRemoved(_) => self.selected_zone = None,
                 IoEvent::ZoneSeek(seek) => self.zone_seek = Some(seek),
-                IoEvent::PauseOnTrackEndActive(pause_on_track_end) => self.pause_on_track_end = pause_on_track_end,
-                _ => ()
+                IoEvent::PauseOnTrackEndActive(pause_on_track_end) => {
+                    self.pause_on_track_end = pause_on_track_end
+                }
+                _ => (),
             }
         }
 
@@ -155,12 +166,23 @@ impl App {
 
     fn get_queue_select_string(&self) -> Option<String> {
         let index = self.queue.state.selected()?;
-        let selected = self.queue.items.as_ref()?.get(index)?.two_line.line1.to_owned();
+        let selected = self
+            .queue
+            .items
+            .as_ref()?
+            .get(index)?
+            .two_line
+            .line1
+            .to_owned();
 
         Some(selected)
     }
 
-    fn apply_queue_changes(&mut self, changes: &Vec<QueueChange>, selected: Option<String>) -> Option<()> {
+    fn apply_queue_changes(
+        &mut self,
+        changes: &Vec<QueueChange>,
+        selected: Option<String>,
+    ) -> Option<()> {
         let queue = self.queue.items.as_mut()?;
 
         for change in changes {
@@ -181,7 +203,9 @@ impl App {
         }
 
         if let Some(selected) = selected {
-            let index = queue.iter().position(|item| item.two_line.line1 == selected);
+            let index = queue
+                .iter()
+                .position(|item| item.two_line.line1 == selected);
 
             self.queue.select(index);
         };
@@ -222,7 +246,7 @@ impl App {
                         self.queue.deselect();
                         self.browse.deselect();
                     }
-                    _  => {
+                    _ => {
                         self.browse.deselect();
                         self.queue.deselect();
                         self.zones.deselect();
@@ -242,9 +266,7 @@ impl App {
     fn select_next_view(&mut self) {
         let view_order = vec![View::Browse, View::Queue, View::NowPlaying];
         let next = match self.selected_view.as_ref() {
-            Some(selected_view) => {
-                view_order.get(selected_view.to_owned() as usize + 1)
-            }
+            Some(selected_view) => view_order.get(selected_view.to_owned() as usize + 1),
             None => return,
         };
         let next = next.cloned().unwrap_or(View::Browse);
@@ -350,79 +372,66 @@ impl App {
             order = [order, ('!'..='@').rev().collect()].concat();
 
             let index = if self.browse_match_list.is_empty() {
-                items
-                    .iter()
-                    .position(|item| {
-                        let title = any_ascii(&item.title);
+                items.iter().position(|item| {
+                    let title = any_ascii(&item.title);
 
-                        while let Some(pop) = order.last() {
-                            let mut pop_matched = false;
-                            let mut matching = |sub: &str| {
-                                if let Some(first_char) = sub.chars().next().unwrap().to_lowercase().next() {
-                                    if first_char == *pop {
-                                        if first_char == key {
-                                            return true;
-                                        } else {
-                                            pop_matched = true;
-                                        }
+                    while let Some(pop) = order.last() {
+                        let mut pop_matched = false;
+                        let mut matching = |sub: &str| {
+                            if let Some(first_char) =
+                                sub.chars().next().unwrap().to_lowercase().next()
+                            {
+                                if first_char == *pop {
+                                    if first_char == key {
+                                        return true;
+                                    } else {
+                                        pop_matched = true;
                                     }
                                 }
-
-                                false
-                            };
-                            let result = if split {
-                                title.split(' ')
-                                    .position(matching)
-                                    .is_some()
-                            } else {
-                                let title = title
-                                    .to_ascii_lowercase()
-                                    .replacen("the ", "", 1);
-                                matching(&title)
-                            };
-
-                            if result {
-                                return result;
-                            } else if key == *pop || pop_matched {
-                                break;
                             }
 
-                            order.pop();
+                            false
+                        };
+                        let result = if split {
+                            title.split(' ').any(matching)
+                        } else {
+                            let title = title.to_ascii_lowercase().replacen("the ", "", 1);
+                            matching(&title)
+                        };
+
+                        if result {
+                            return result;
+                        } else if key == *pop || pop_matched {
+                            break;
                         }
 
-                        false
-                    })
+                        order.pop();
+                    }
+
+                    false
+                })
             } else {
                 let skip = *self.browse_match_list.last().unwrap();
-                let position = items
-                    .iter()
-                    .skip(skip)
-                    .position(|item| {
-                        // Find an upcoming item with matching input
-                        let title = any_ascii(&item.title)
-                            .to_ascii_lowercase()
-                            .replacen("the ", "", 1);
+                let position = items.iter().skip(skip).position(|item| {
+                    // Find an upcoming item with matching input
+                    let title = any_ascii(&item.title)
+                        .to_ascii_lowercase()
+                        .replacen("the ", "", 1);
 
-                        if split {
-                            title.split(' ')
-                                .position(|sub| sub.starts_with(input.as_str()))
-                                .is_some()
-                        } else {
-                            title.starts_with(input.as_str())
-                        }
-                    });
+                    if split {
+                        title.split(' ').any(|sub| sub.starts_with(input.as_str()))
+                    } else {
+                        title.starts_with(input.as_str())
+                    }
+                });
 
-                if let Some(position) = position {
-                    Some(skip + position)
-                } else {
-                    None
-                }
+                position.map(|position| skip + position)
             };
 
-            if index.is_some() {
+            if let Some(index) = index {
                 self.input = input;
-                self.browse_match_list.push(index.unwrap());
-                self.browse.state.select(index);
+                self.browse_match_list.push(index);
+                self.browse.state.select(Some(index));
             }
         }
     }
@@ -445,7 +454,9 @@ impl App {
                             // Key codes specific to the active view
                             if let Some(view) = selected_view.as_ref() {
                                 match *view {
-                                    View::NowPlaying => self.handle_now_playing_key_codes(key).await,
+                                    View::NowPlaying => {
+                                        self.handle_now_playing_key_codes(key).await
+                                    }
                                     View::Queue => self.handle_queue_key_codes(key).await,
                                     View::Zones => self.handle_zone_key_codes(key).await,
                                     _ => (),
@@ -455,37 +466,50 @@ impl App {
                     }
                 }
                 KeyModifiers::SHIFT => {
-                    match key.code {
-                        KeyCode::BackTab => {
-                            self.input.clear();
-                            self.browse_match_list.clear();
-                            self.select_prev_view();
-                        }
-                        _ => (),
+                    if key.code == KeyCode::BackTab {
+                        self.input.clear();
+                        self.browse_match_list.clear();
+                        self.select_prev_view();
                     }
                 }
-                KeyModifiers::CONTROL => {
-                    match key.code {
-                        KeyCode::Up => self.to_roon.send(IoEvent::ChangeVolume(1)).await.unwrap(),
-                        KeyCode::Down => self.to_roon.send(IoEvent::ChangeVolume(-1)).await.unwrap(),
-                        KeyCode::Left => self.to_roon.send(IoEvent::Control(Control::Previous)).await.unwrap(),
-                        KeyCode::Right => self.to_roon.send(IoEvent::Control(Control::Next)).await.unwrap(),
-                        KeyCode::Delete => self.to_roon.send(IoEvent::QueueClear).await.unwrap(),
-                        KeyCode::Char('e') => self.to_roon.send(IoEvent::PauseOnTrackEndReq).await.unwrap(),
-                        KeyCode::Char('p') | KeyCode::Char(' ') => self.to_roon.send(IoEvent::Control(Control::PlayPause)).await.unwrap(),
-                        KeyCode::Char('q') => self.to_roon.send(IoEvent::QueueModeNext).await.unwrap(),
-                        KeyCode::Char('a') => self.to_roon.send(IoEvent::QueueModeAppend).await.unwrap(),
-                        KeyCode::Char('z') => {
-                            if let Some(View::Prompt) = selected_view.as_ref() {
-                                self.restore_view();
-                            }
+                KeyModifiers::CONTROL => match key.code {
+                    KeyCode::Up => self.to_roon.send(IoEvent::ChangeVolume(1)).await.unwrap(),
+                    KeyCode::Down => self.to_roon.send(IoEvent::ChangeVolume(-1)).await.unwrap(),
+                    KeyCode::Left => self
+                        .to_roon
+                        .send(IoEvent::Control(Control::Previous))
+                        .await
+                        .unwrap(),
+                    KeyCode::Right => self
+                        .to_roon
+                        .send(IoEvent::Control(Control::Next))
+                        .await
+                        .unwrap(),
+                    KeyCode::Delete => self.to_roon.send(IoEvent::QueueClear).await.unwrap(),
+                    KeyCode::Char('e') => self
+                        .to_roon
+                        .send(IoEvent::PauseOnTrackEndReq)
+                        .await
+                        .unwrap(),
+                    KeyCode::Char('p') | KeyCode::Char(' ') => self
+                        .to_roon
+                        .send(IoEvent::Control(Control::PlayPause))
+                        .await
+                        .unwrap(),
+                    KeyCode::Char('q') => self.to_roon.send(IoEvent::QueueModeNext).await.unwrap(),
+                    KeyCode::Char('a') => {
+                        self.to_roon.send(IoEvent::QueueModeAppend).await.unwrap()
+                    }
+                    KeyCode::Char('z') => {
+                        if let Some(View::Prompt) = selected_view.as_ref() {
+                            self.restore_view();
+                        }
 
-                            self.select_view(Some(View::Zones));
-                        }
-                        KeyCode::Char('c') => return AppReturn::Exit,
-                        _ => (),
+                        self.select_view(Some(View::Zones));
                     }
-                }
+                    KeyCode::Char('c') => return AppReturn::Exit,
+                    _ => (),
+                },
                 _ => (),
             }
 
@@ -510,64 +534,72 @@ impl App {
                 }
             }
             KeyModifiers::SHIFT => {
-                match key.code {
-                    KeyCode::Char(key) => self.select_by_input(key),
-                    _ => (),
+                if let KeyCode::Char(key) = key.code {
+                    self.select_by_input(key)
                 }
             }
-            KeyModifiers::NONE => {
-                match key.code {
-                    KeyCode::Char(key) => self.select_by_input(key),
-                    KeyCode::Backspace => {
-                        self.input.pop();
-                        self.browse_match_list.pop();
-                        self.browse.select(self.browse_match_list.last().cloned());
-                    }
-                    KeyCode::Up => self.browse.prev(),
-                    KeyCode::Down => self.browse.next(),
-                    KeyCode::Enter => {
-                        self.input.clear();
-                        self.browse_match_list.clear();
-                        let item_key = self.get_item_key();
+            KeyModifiers::NONE => match key.code {
+                KeyCode::Char(key) => self.select_by_input(key),
+                KeyCode::Backspace => {
+                    self.input.pop();
+                    self.browse_match_list.pop();
+                    self.browse.select(self.browse_match_list.last().cloned());
+                }
+                KeyCode::Up => self.browse.prev(),
+                KeyCode::Down => self.browse.next(),
+                KeyCode::Enter => {
+                    self.input.clear();
+                    self.browse_match_list.clear();
+                    let item_key = self.get_item_key();
 
-                        if let Some(item) = self.browse.get_selected_item() {
-                            if let Some(prompt) = item.input_prompt.as_ref() {
-                                self.prompt = prompt.prompt.to_owned();
-                                self.pending_item_key = item_key;
-                                self.select_view(Some(View::Prompt));
-                            } else {
-                                self.to_roon.send(IoEvent::BrowseSelected(item_key)).await.unwrap();
-                            }
+                    if let Some(item) = self.browse.get_selected_item() {
+                        if let Some(prompt) = item.input_prompt.as_ref() {
+                            self.prompt = prompt.prompt.to_owned();
+                            self.pending_item_key = item_key;
+                            self.select_view(Some(View::Prompt));
+                        } else {
+                            self.to_roon
+                                .send(IoEvent::BrowseSelected(item_key))
+                                .await
+                                .unwrap();
                         }
                     }
-                    KeyCode::Esc => {
+                }
+                KeyCode::Esc => {
+                    self.input.clear();
+                    self.browse_match_list.clear();
+                    self.to_roon.send(IoEvent::BrowseBack).await.unwrap();
+                }
+                KeyCode::Home => {
+                    if self.input.is_empty() {
+                        self.browse.select_first();
+                    } else {
                         self.input.clear();
                         self.browse_match_list.clear();
-                        self.to_roon.send(IoEvent::BrowseBack).await.unwrap();
                     }
-                    KeyCode::Home => {
-                        if self.input.is_empty() {
-                            self.browse.select_first();
-                        } else {
-                            self.input.clear();
-                            self.browse_match_list.clear();
-                        }
-                    }
-                    KeyCode::End => self.browse.select_last(),
-                    KeyCode::PageUp => self.browse.select_prev_page(),
-                    KeyCode::PageDown => self.browse.select_next_page(),
-                    KeyCode::F(5) => self.to_roon.send(IoEvent::BrowseRefresh).await.unwrap(),
-                    _ => (),
                 }
-            }
+                KeyCode::End => self.browse.select_last(),
+                KeyCode::PageUp => self.browse.select_prev_page(),
+                KeyCode::PageDown => self.browse.select_next_page(),
+                KeyCode::F(5) => self.to_roon.send(IoEvent::BrowseRefresh).await.unwrap(),
+                _ => (),
+            },
             _ => (),
         }
     }
 
     async fn handle_now_playing_key_codes(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Char('m') => self.to_roon.send(IoEvent::Mute(volume::Mute::Mute)).await.unwrap(),
-            KeyCode::Char('u') => self.to_roon.send(IoEvent::Mute(volume::Mute::Unmute)).await.unwrap(),
+            KeyCode::Char('m') => self
+                .to_roon
+                .send(IoEvent::Mute(volume::Mute::Mute))
+                .await
+                .unwrap(),
+            KeyCode::Char('u') => self
+                .to_roon
+                .send(IoEvent::Mute(volume::Mute::Unmute))
+                .await
+                .unwrap(),
             KeyCode::Char('+') => self.to_roon.send(IoEvent::ChangeVolume(1)).await.unwrap(),
             KeyCode::Char('-') => self.to_roon.send(IoEvent::ChangeVolume(-1)).await.unwrap(),
             _ => (),
@@ -588,7 +620,10 @@ impl App {
                     // meaning that the selected one will get on top
                     self.queue.select_first();
 
-                    self.to_roon.send(IoEvent::QueueSelected(queue_item_id)).await.unwrap();
+                    self.to_roon
+                        .send(IoEvent::QueueSelected(queue_item_id))
+                        .await
+                        .unwrap();
                 }
             }
             _ => (),
@@ -598,42 +633,45 @@ impl App {
     async fn handle_prompt_key_codes(&mut self, key: KeyEvent) {
         match key.modifiers {
             KeyModifiers::SHIFT => {
-                match key.code {
-                    KeyCode::Char(to_insert) => self.enter_char(to_insert),
-                    _ => (),
+                if let KeyCode::Char(to_insert) = key.code {
+                    self.enter_char(to_insert)
                 }
             }
-            KeyModifiers::NONE => {
-                match key.code {
-                    KeyCode::Enter => {
-                        if self.pending_item_key.is_some() {
-                            self.to_roon.send(IoEvent::BrowseInput(self.input.clone())).await.unwrap();
-                            self.to_roon.send(IoEvent::BrowseSelected(self.pending_item_key.take())).await.unwrap();
-                        }
+            KeyModifiers::NONE => match key.code {
+                KeyCode::Enter => {
+                    if self.pending_item_key.is_some() {
+                        self.to_roon
+                            .send(IoEvent::BrowseInput(self.input.clone()))
+                            .await
+                            .unwrap();
+                        self.to_roon
+                            .send(IoEvent::BrowseSelected(self.pending_item_key.take()))
+                            .await
+                            .unwrap();
+                    }
 
-                        self.input.clear();
-                        self.reset_cursor();
-                        self.restore_view();
-                    }
-                    KeyCode::Char(to_insert) => self.enter_char(to_insert),
-                    KeyCode::Backspace => self.delete_char(),
-                    KeyCode::Delete => {
-                        self.move_cursor_right();
-                        self.delete_char();
-                    }
-                    KeyCode::Left => self.move_cursor_left(),
-                    KeyCode::Right => self.move_cursor_right(),
-                    KeyCode::Home => self.move_cursor_home(),
-                    KeyCode::End => self.move_cursor_end(),
-                    KeyCode::Esc => {
-                        self.pending_item_key = None;
-                        self.input.clear();
-                        self.reset_cursor();
-                        self.restore_view();
-                    }
-                    _ => (),
+                    self.input.clear();
+                    self.reset_cursor();
+                    self.restore_view();
                 }
-            }
+                KeyCode::Char(to_insert) => self.enter_char(to_insert),
+                KeyCode::Backspace => self.delete_char(),
+                KeyCode::Delete => {
+                    self.move_cursor_right();
+                    self.delete_char();
+                }
+                KeyCode::Left => self.move_cursor_left(),
+                KeyCode::Right => self.move_cursor_right(),
+                KeyCode::Home => self.move_cursor_home(),
+                KeyCode::End => self.move_cursor_end(),
+                KeyCode::Esc => {
+                    self.pending_item_key = None;
+                    self.input.clear();
+                    self.reset_cursor();
+                    self.restore_view();
+                }
+                _ => (),
+            },
             _ => (),
         }
     }
@@ -651,7 +689,10 @@ impl App {
                 self.restore_view();
 
                 if let Some(zone_id) = selected_zone_id.as_ref() {
-                    self.to_roon.send(IoEvent::ZoneSelected(zone_id.to_owned())).await.unwrap();
+                    self.to_roon
+                        .send(IoEvent::ZoneSelected(zone_id.to_owned()))
+                        .await
+                        .unwrap();
                 }
             }
             KeyCode::Esc => self.restore_view(),
@@ -668,6 +709,9 @@ impl App {
     }
 
     fn get_zone_id(&self) -> Option<String> {
-        self.zones.get_selected_item().map(|(zone_id, _)| zone_id).cloned()
+        self.zones
+            .get_selected_item()
+            .map(|(zone_id, _)| zone_id)
+            .cloned()
     }
 }
