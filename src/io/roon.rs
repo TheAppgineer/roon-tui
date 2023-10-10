@@ -2,21 +2,15 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
-use std::{collections::HashMap, fs, path};
 use std::sync::Arc;
-use tokio::{sync::mpsc, select};
+use std::{collections::HashMap, fs, path};
+use tokio::{select, sync::mpsc};
 
 use roon_api::{
-    info,
     browse::{Action, Browse, BrowseOpts, LoadOpts},
-    CoreEvent,
-    Info,
-    LogLevel,
-    Parsed,
-    RoonApi,
-    Services,
-    Svc,
-    transport::{Control, QueueItem, Seek, State, Transport, volume, Zone},
+    info,
+    transport::{volume, Control, QueueItem, Seek, State, Transport, Zone},
+    CoreEvent, Info, LogLevel, Parsed, RoonApi, Services, Svc,
 };
 
 use super::{IoEvent, QueueMode};
@@ -36,7 +30,11 @@ struct Settings {
     queue_modes: Option<HashMap<String, QueueMode>>,
 }
 
-pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
+pub async fn start(
+    options: Options,
+    to_app: mpsc::Sender<IoEvent>,
+    mut from_app: mpsc::Receiver<IoEvent>,
+) {
     let config_path = options.config;
     let path = path::Path::new(&config_path);
     let mut info = info!("com.theappgineer", "Roon TUI");
@@ -52,25 +50,28 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, mut from_app
     let provided: HashMap<String, Svc> = HashMap::new();
     let config_path = Arc::new(config_path);
     let config_path_clone = config_path.clone();
-    let get_roon_state = move || {
-        RoonApi::load_config(&config_path_clone, "roonstate")
-    };
+    let get_roon_state = move || RoonApi::load_config(&config_path_clone, "roonstate");
     let (_, mut core_rx) = match options.ip {
         Some(ip) => {
             let ip = &IpAddr::V4(Ipv4Addr::from_str(&ip).unwrap());
             let port = &options.port;
 
             println!("Connecting to server at: {}:{}", ip, port);
-            roon.ws_connect(Box::new(get_roon_state), provided, services, ip, port).await.unwrap()
+            roon.ws_connect(Box::new(get_roon_state), provided, services, ip, port)
+                .await
+                .unwrap()
         }
-        None => {
-            roon.start_discovery(Box::new(get_roon_state), provided, services).await.unwrap()
-        }
+        None => roon
+            .start_discovery(Box::new(get_roon_state), provided, services)
+            .await
+            .unwrap(),
     };
 
     tokio::spawn(async move {
         const QUEUE_ITEM_COUNT: u32 = 100;
-        let mut settings: Settings = serde_json::from_value(RoonApi::load_config(&config_path, "settings")).unwrap_or_default();
+        let mut settings: Settings =
+            serde_json::from_value(RoonApi::load_config(&config_path, "settings"))
+                .unwrap_or_default();
         let mut browse = None;
         let mut transport = None;
         let mut zone_map = HashMap::new();
@@ -102,7 +103,7 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, mut from_app
                                 transport.subscribe_zones().await;
 
                                 if let Some(zone_id) = settings.zone_id.as_ref() {
-                                    transport.subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
+                                    transport.subscribe_queue(zone_id, QUEUE_ITEM_COUNT).await;
                                 }
                             }
 
@@ -294,10 +295,7 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, mut from_app
                             if let Some(queue_mode) = select_next_queue_mode(&mut settings) {
                                 to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
 
-                                let auto_radio = match queue_mode {
-                                    QueueMode::RoonRadio => true,
-                                    _ => false,
-                                };
+                                let auto_radio = matches!(queue_mode, QueueMode::RoonRadio);
 
                                 set_roon_radio(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), auto_radio).await.unwrap();
 
@@ -383,7 +381,10 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, mut from_app
     });
 }
 
-fn handle_pause_on_track_end_req(settings: &Settings, zone_map: &HashMap<String, Zone>) -> Option<bool> {
+fn handle_pause_on_track_end_req(
+    settings: &Settings,
+    zone_map: &HashMap<String, Zone>,
+) -> Option<bool> {
     let zone_id = settings.zone_id.as_ref()?;
     let zone = zone_map.get(zone_id)?;
     let now_playing_length = zone.now_playing.as_ref()?.length?;
@@ -391,7 +392,10 @@ fn handle_pause_on_track_end_req(settings: &Settings, zone_map: &HashMap<String,
     Some(zone.state == State::Playing && now_playing_length > 0)
 }
 
-fn get_profile_name(profiles: Option<&Vec<(String, String)>>, item_key: Option<&str>) -> Option<String> {
+fn get_profile_name(
+    profiles: Option<&Vec<(String, String)>>,
+    item_key: Option<&str>,
+) -> Option<String> {
     let profiles = profiles?;
 
     profiles.iter().find_map(|(key, title)| {
@@ -483,14 +487,23 @@ async fn handle_browse_response(
                 }
 
                 let profiles = if result.list.title == "Profile" {
-                    Some(result.items.iter().filter_map(|item| {
-                        Some((item.item_key.as_ref()?.clone(), item.title.clone()))
-                    }).collect())
+                    Some(
+                        result
+                            .items
+                            .iter()
+                            .filter_map(|item| {
+                                Some((item.item_key.as_ref()?.clone(), item.title.clone()))
+                            })
+                            .collect(),
+                    )
                 } else {
                     None
                 };
 
-                to_app.send(IoEvent::BrowseList(result.offset, result.items)).await.unwrap();
+                to_app
+                    .send(IoEvent::BrowseList(result.offset, result.items))
+                    .await
+                    .unwrap();
 
                 profiles
             } else {
@@ -503,12 +516,18 @@ async fn handle_browse_response(
 
                 let item = if step.is_empty() {
                     if result.list.title == "Profile" {
-                        result.items.iter().find_map(|item| if item.title == profile? {Some(item)} else {None})
+                        result.items.iter().find_map(|item| {
+                            if item.title == profile? {
+                                Some(item)
+                            } else {
+                                None
+                            }
+                        })
                     } else {
-                        result.items.iter().next()
+                        result.items.first()
                     }
                 } else {
-                    result.items.iter().find_map(|item| if item.title == step {Some(item)} else {None})
+                    result.items.iter().find(|item| item.title == step)
                 };
 
                 let opts = BrowseOpts {
@@ -527,7 +546,7 @@ async fn handle_browse_response(
     }
 }
 
-fn select_next_queue_mode<'a>(settings: &'a mut Settings) -> Option<&'a QueueMode> {
+fn select_next_queue_mode(settings: &mut Settings) -> Option<&QueueMode> {
     let zone_id = settings.zone_id.as_deref()?;
 
     if settings.queue_modes.is_none() {
@@ -544,10 +563,7 @@ fn select_next_queue_mode<'a>(settings: &'a mut Settings) -> Option<&'a QueueMod
         let queue_mode = queue_modes.get_mut(zone_id)?;
         let index = queue_mode.to_owned() as usize + 1;
         let seq = if settings.profile.is_none() {
-            vec![
-                QueueMode::Manual,
-                QueueMode::RoonRadio,
-            ]
+            vec![QueueMode::Manual, QueueMode::RoonRadio]
         } else {
             vec![
                 QueueMode::Manual,
@@ -566,7 +582,7 @@ fn select_next_queue_mode<'a>(settings: &'a mut Settings) -> Option<&'a QueueMod
     }
 }
 
-fn sync_queue_mode<'a>(settings: &'a mut Settings, auto_radio: bool) -> Option<&'a QueueMode> {
+fn sync_queue_mode(settings: &mut Settings, auto_radio: bool) -> Option<&QueueMode> {
     let zone_id = settings.zone_id.as_ref()?;
     let queue_mode = if auto_radio {
         QueueMode::RoonRadio
@@ -580,7 +596,10 @@ fn sync_queue_mode<'a>(settings: &'a mut Settings, auto_radio: bool) -> Option<&
         QueueMode::default()
     };
 
-    settings.queue_modes.as_mut()?.insert(zone_id.to_owned(), queue_mode);
+    settings
+        .queue_modes
+        .as_mut()?
+        .insert(zone_id.to_owned(), queue_mode);
 
     settings.queue_modes.as_ref()?.get(zone_id)
 }
@@ -601,7 +620,7 @@ async fn handle_queue_mode(
         }
     }
 
-    let play_action = if play {"Play Now"} else {"Queue"};
+    let play_action = if play { "Play Now" } else { "Queue" };
 
     match queue_mode {
         QueueMode::RandomAlbum => {
@@ -650,16 +669,17 @@ async fn change_volume(
     transport: Option<&Transport>,
     zone_map: &HashMap<String, Zone>,
     zone_id: Option<&str>,
-    steps: i32
+    steps: i32,
 ) -> Option<Vec<usize>> {
     let zone = zone_map.get(zone_id?)?;
     let mut req_ids = Vec::new();
 
     for output in &zone.outputs {
-        req_ids.push(transport?.change_volume(
-            &output.output_id,
-            &volume::ChangeMode::RelativeStep, steps
-        ).await?);
+        req_ids.push(
+            transport?
+                .change_volume(&output.output_id, &volume::ChangeMode::RelativeStep, steps)
+                .await?,
+        );
     }
 
     Some(req_ids)
@@ -675,7 +695,7 @@ async fn control(
     match how {
         Control::Next => zone.is_next_allowed.then_some(())?,
         Control::Previous => zone.is_previous_allowed.then_some(())?,
-        _ => ()
+        _ => (),
     }
 
     transport?.control(&zone.zone_id, how).await
@@ -701,7 +721,9 @@ async fn play_queue_end(
     let transport = transport?;
     let queue_end = queue_end?;
 
-    transport.play_from_here(zone_id?, queue_end.queue_item_id).await;
+    transport
+        .play_from_here(zone_id?, queue_end.queue_item_id)
+        .await;
 
     Some(queue_end.length as i32)
 }
@@ -711,7 +733,9 @@ async fn seek_to_end(
     zone_id: Option<&str>,
     seek_seconds: Option<i32>,
 ) -> Option<()> {
-    transport?.seek(zone_id?, &Seek::Absolute, seek_seconds?).await;
+    transport?
+        .seek(zone_id?, &Seek::Absolute, seek_seconds?)
+        .await;
 
     Some(())
 }

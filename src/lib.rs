@@ -1,9 +1,9 @@
-use std::io::stdout;
-use crossterm::{execute, event, terminal};
 use app::{App, AppReturn};
+use crossterm::{event, execute, terminal};
 use eyre::Result;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use std::io::stdout;
 
 use crate::app::ui;
 
@@ -14,7 +14,11 @@ pub async fn start_ui(app: &mut App) -> Result<()> {
     // Configure Crossterm backend for tui
     terminal::enable_raw_mode()?;
     let mut stdout = stdout();
-    execute!(stdout, terminal::EnterAlternateScreen, event::EnableMouseCapture)?;
+    execute!(
+        stdout,
+        terminal::EnterAlternateScreen,
+        event::EnableMouseCapture
+    )?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 

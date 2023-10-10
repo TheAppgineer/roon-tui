@@ -8,6 +8,12 @@ pub struct StatefulList<T> {
     page_lines: usize,
 }
 
+impl<T> Default for StatefulList<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> StatefulList<T> {
     pub fn new() -> StatefulList<T> {
         StatefulList {
@@ -21,7 +27,9 @@ impl<T> StatefulList<T> {
 
     pub fn next(&mut self) {
         if let Some(item_count) = self.items.as_ref().map(|items| items.len()) {
-            let next = self.state.selected()
+            let next = self
+                .state
+                .selected()
                 .map(|i| if item_count > i + 1 { i + 1 } else { i });
 
             self.state.select(next);
@@ -29,9 +37,8 @@ impl<T> StatefulList<T> {
     }
 
     pub fn prev(&mut self) {
-        if let Some(_) = self.items {
-            let prev = self.state.selected()
-                .map(|i| if i > 0 { i - 1 } else { 0 });
+        if self.items.is_some() {
+            let prev = self.state.selected().map(|i| if i > 0 { i - 1 } else { 0 });
 
             self.state.select(prev);
         }
@@ -83,13 +90,17 @@ impl<T> StatefulList<T> {
             for i in selected..item_count {
                 counted_lines += self.item_line_count[i];
 
-                if counted_lines == self.page_lines {
-                    self.state.select(Some(i));
-                    break;
-                } else if counted_lines > self.page_lines {
-                    // Skip the incomplete item at the end
-                    self.state.select(Some(i - 1));
-                    break;
+                match self.page_lines.cmp(&counted_lines) {
+                    std::cmp::Ordering::Equal => {
+                        self.state.select(Some(i));
+                        break;
+                    }
+                    std::cmp::Ordering::Less => {
+                        // Skip the incomplete item at the end
+                        self.state.select(Some(i - 1));
+                        break;
+                    }
+                    std::cmp::Ordering::Greater => {}
                 }
             }
 
@@ -148,7 +159,7 @@ impl<T> StatefulList<T> {
             if let Some(items) = self.items.as_ref() {
                 for item in items.iter() {
                     let line_count = f(item);
-    
+
                     item_line_count.push(line_count);
                 }
             }
