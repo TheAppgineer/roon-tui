@@ -11,7 +11,6 @@ use roon_api::{
     browse::{Action, Browse, BrowseOpts, LoadOpts},
     CoreEvent,
     Info,
-    LogLevel,
     Parsed,
     RoonApi,
     Services,
@@ -39,9 +38,8 @@ struct Settings {
 pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
     let config_path = options.config;
     let path = path::Path::new(&config_path);
-    let mut info = info!("com.theappgineer", "Roon TUI");
+    let info = info!("com.theappgineer", "Roon TUI");
 
-    info.set_log_level(LogLevel::None);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
 
     let mut roon = RoonApi::new(info);
@@ -60,7 +58,7 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, mut from_app
             let ip = &IpAddr::V4(Ipv4Addr::from_str(&ip).unwrap());
             let port = &options.port;
 
-            println!("Connecting to server at: {}:{}", ip, port);
+            log::info!("Connecting to server at: {}:{}", ip, port);
             roon.ws_connect(Box::new(get_roon_state), provided, services, ip, port).await.unwrap()
         }
         None => {
