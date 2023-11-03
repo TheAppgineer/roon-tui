@@ -22,7 +22,7 @@ eyre = "0.6"
 any_ascii = "0.3.2"
 rand = "0.8.5"
 clap = { version = "4.4.4", features = ["derive"] }
-roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", rev = "2a45668", features = ["browse", "transport"] }
+roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", rev = "c7dff4f", features = ["browse", "transport"] }
 
 [profile.release]
 strip = true

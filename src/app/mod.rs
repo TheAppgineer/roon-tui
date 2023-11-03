@@ -83,7 +83,7 @@ impl App {
                 }
                 IoEvent::BrowseTitle(browse_title) => {
                     if self.selected_view.is_none() {
-                        self.selected_view = Some(View::Browse);
+                        self.select_view(Some(View::Browse));
                     }
 
                     self.browse.title = Some(browse_title);

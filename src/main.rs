@@ -97,7 +97,5 @@ async fn main() -> Result<()> {
 
     roon::start(options, to_app, from_app).await;
 
-    start_ui(&mut app).await?;
-
-    Ok(())
+    start_ui(&mut app).await
 }
