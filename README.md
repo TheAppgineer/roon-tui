@@ -2,25 +2,35 @@
 
 ### A Roon Remote for the terminal
 
+## About
 ![Roon TUI screenshot](images/screenshot.png)
 
-## Building from Source Code
+Roon TUI is a lightweight Roon Remote, providing quick access to the basic controls.
+
+Roon TUI uses an own developed [Rust port](https://github.com/TheAppgineer/rust-roon-api) of the Roon API, instead of using the official [Node.js Roon API](https://github.com/RoonLabs/node-roon-api) provided by Roon Labs.
+
+## Installation
+
+### Building from Source Code
 * Install Rust: visit [rustup.rs](https://rustup.rs/) and follow the provided instructions
 * Clone the roon-tui git repository: `git clone https://github.com/TheAppgineer/roon-tui.git`
 * Change directory and build the project: `cd roon-tui && cargo build --release`
 * The binary can be found in: `target/release/roon-tui`
 
-## Downloading Release Binaries
+### Downloading Release Binaries
 Prebuilt binaries can be downloaded from the [latests release](https://github.com/TheAppgineer/roon-tui/releases/latest) page on GitHub. Binaries might have been created by other users for platforms I don't have access to myself.
 
-## Using Homebrew (macOS)
+### Using Homebrew (macOS)
 User [Nepherte](https://github.com/Nepherte) created a Homebrew tap from which you can install Roon TUI. Instructions can be found at https://github.com/Nepherte/homebrew-roon.
+
+### Using Arch User Repository
+For Arch Linux users there is an entry in the [AUR](https://aur.archlinux.org/packages/roon-tui), provided by Roon user [YuiFunami](https://community.roonlabs.com/u/yuifunami/).
 
 ## Authorizing Core Access
 On first execution the outside border of the UI will be highlighted without any views active, this indicates that pairing with a Roon Core has to take place. Use your Roon Remote and select Settings&rarr;Extensions from the hamburger menu and then Enable Roon TUI.
 
 ## Project Status
-This is Alpha stage software. Instead of using the official [Node.js Roon API](https://github.com/RoonLabs/node-roon-api) provided by Roon Labs this project uses an own developed [Rust port](https://github.com/TheAppgineer/rust-roon-api) of the API.
+This is Beta stage software. Since its first Alpha release it has been picked up by a small group of Roon enthousiasts, who gave good feedback to bring it to this next level.
 
 ## Usage Instructions
 ### Command Line Options
@@ -35,6 +45,8 @@ Options:
   -c, --config <CONFIG>  Path to the config.json file [default: config.json]
   -i, --ip <IP>          IP address of the Server, disables server discovery
   -p, --port <PORT>      Port number of the Server [default: 9330]
+  -l, --log <LOG>        Path to the log file [default: roon-tui.log]
+  -v, --verbose          Enable verbose logging to file
   -h, --help             Print help
   -V, --version          Print version
 ```
@@ -50,6 +62,17 @@ By default the server discovery functionality provided by the Roon API is used. 
 Use your Roon Remote and select Settings&rarr;Displays from the hamburger menu to find the address and port in the Web display URL.
 
     roon-tui -i 192.168.1.10 -p 9330
+
+#### Specifying Log File
+The default location of the `roon-tui.log` log file is the current working directory. This is troublesome when the executable is placed in a system folder and accessed by using the `PATH` environment variable, because the user account might not have permissions to write to that location. This can be solved by placing the log file somewehere in the home folder and specifying its location at startup on the command line. In the below example the log file is stored in the users `.log` folder:
+
+    roon-tui -l ~/.log/roon-tui/roon-tui.log
+
+By default only warnings and errors (including panics) are written to the log file. More information can be stored in the log file by specifying the verbose option on the command line:
+
+    roon-tui -v
+
+The verbose option is meant to track down any issues, might they occur. Normally it is not adviced to use it as it results in large log files.
 
 ### Multi-character Jump in Browse View
 After a list of Artists, Albums, etc. is selected, and it is known what to play, a name can be directly typed in the Browse View. The first item that matches the input will be selected. The currently matched characters are displayed in the lower left corner of the view. The Backspace key can be used to revert to previous selections, the Home keys clears the complete input.
