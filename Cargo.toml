@@ -1,6 +1,6 @@
 [package]
 name = "roon-tui"
-version = "0.0.7"
+version = "0.1.0"
 authors = ["The Appgineer <theappgineer@gmail.com>"]
 edition = "2021"
 license-file = "LICENSE"
@@ -10,7 +10,10 @@ publish = false
 
 [dependencies]
 log = "0.4"
-ratatui = { version = "0.23.0", features = ["crossterm"], default-features = false }
+simplelog = "0.12"
+time = "0.3"
+chrono = { version = "0.4", features = ["clock"], default-features = false }
+ratatui = { version = "0.24.0", features = ["crossterm"], default-features = false }
 crossterm = "0.27.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -19,7 +22,7 @@ eyre = "0.6"
 any_ascii = "0.3.2"
 rand = "0.8.5"
 clap = { version = "4.4.4", features = ["derive"] }
-roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", tag = "0.0.7", features = ["browse", "transport"] }
+roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", tag = "0.1.0", features = ["browse", "transport"] }
 
 [profile.release]
 strip = true

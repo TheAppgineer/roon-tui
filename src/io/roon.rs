@@ -4,14 +4,13 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 use std::{collections::HashMap, fs, path};
 use std::sync::Arc;
-use tokio::{sync::mpsc, select};
+use tokio::{sync::{mpsc, Mutex}, time::{Duration, sleep}, select};
 
 use roon_api::{
     info,
     browse::{Action, Browse, BrowseOpts, LoadOpts},
     CoreEvent,
     Info,
-    LogLevel,
     Parsed,
     RoonApi,
     Services,
@@ -36,349 +35,370 @@ struct Settings {
     queue_modes: Option<HashMap<String, QueueMode>>,
 }
 
-pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, mut from_app: mpsc::Receiver<IoEvent>) {
+pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mpsc::Receiver<IoEvent>) {
     let config_path = options.config;
+    let ip = options.ip;
+    let port = options.port;
     let path = path::Path::new(&config_path);
-    let mut info = info!("com.theappgineer", "Roon TUI");
 
-    info.set_log_level(LogLevel::None);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
 
-    let mut roon = RoonApi::new(info);
-    let services = Some(vec![
-        Services::Browse(Browse::new()),
-        Services::Transport(Transport::new()),
-    ]);
-    let provided: HashMap<String, Svc> = HashMap::new();
     let config_path = Arc::new(config_path);
-    let config_path_clone = config_path.clone();
-    let get_roon_state = move || {
-        RoonApi::load_config(&config_path_clone, "roonstate")
-    };
-    let (_, mut core_rx) = match options.ip {
-        Some(ip) => {
-            let ip = &IpAddr::V4(Ipv4Addr::from_str(&ip).unwrap());
-            let port = &options.port;
-
-            println!("Connecting to server at: {}:{}", ip, port);
-            roon.ws_connect(Box::new(get_roon_state), provided, services, ip, port).await.unwrap()
-        }
-        None => {
-            roon.start_discovery(Box::new(get_roon_state), provided, services).await.unwrap()
-        }
-    };
+    let from_app = Arc::new(Mutex::new(from_app));
+    let info = info!("com.theappgineer", "Roon TUI");
+    let mut roon = RoonApi::new(info);
 
     tokio::spawn(async move {
-        const QUEUE_ITEM_COUNT: u32 = 100;
-        let mut settings: Settings = serde_json::from_value(RoonApi::load_config(&config_path, "settings")).unwrap_or_default();
-        let mut browse = None;
-        let mut transport = None;
-        let mut zone_map = HashMap::new();
-        let mut pause_on_track_end = false;
-        let mut browse_paths = HashMap::new();
-        let mut profiles = None;
-        let mut queue_end = None;
-        let mut seek_seconds = None;
-        let mut opts = BrowseOpts {
-            multi_session_key: Some(TUI_BROWSE.to_owned()),
-            ..Default::default()
-        };
-
         loop {
-            select! {
-                Some((core_event, msg)) = core_rx.recv() => {
-                    match core_event {
-                        CoreEvent::Found(mut paired_core) => {
-                            browse = paired_core.get_browse().cloned();
-                            transport = paired_core.get_transport().cloned();
+            let services = Some(vec![
+                Services::Browse(Browse::new()),
+                Services::Transport(Transport::new()),
+            ]);
+            let provided: HashMap<String, Svc> = HashMap::new();
+            let config_path_clone = config_path.clone();
+            let get_roon_state = move || {
+                RoonApi::load_config(&config_path_clone, "roonstate")
+            };
+            let result = match ip.as_deref() {
+                Some(ip) => {
+                    let ip = &IpAddr::V4(Ipv4Addr::from_str(ip).unwrap());
+                    let port = &port;
 
-                            if let Some(browse) = browse.as_ref() {
-                                opts.pop_all = true;
+                    roon.ws_connect(Box::new(get_roon_state), provided, services, ip, port).await
+                }
+                None => {
+                    roon.start_discovery(Box::new(get_roon_state), provided, services).await
+                }
+            };
 
-                                browse.browse(&opts).await;
-                            }
+            if let Some((mut handlers, mut core_rx)) = result {
+                let config_path = config_path.clone();
+                let to_app = to_app.clone();
+                let from_app = from_app.clone();
 
-                            if let Some(transport) = transport.as_ref() {
-                                transport.subscribe_zones().await;
+                handlers.spawn(async move {
+                    const QUEUE_ITEM_COUNT: u32 = 100;
+                    let mut settings: Settings = serde_json::from_value(RoonApi::load_config(&config_path, "settings")).unwrap_or_default();
+                    let mut browse = None;
+                    let mut transport = None;
+                    let mut zone_map = HashMap::new();
+                    let mut pause_on_track_end = false;
+                    let mut browse_paths = HashMap::new();
+                    let mut profiles = None;
+                    let mut queue_end = None;
+                    let mut seek_seconds = None;
+                    let mut opts = BrowseOpts {
+                        multi_session_key: Some(TUI_BROWSE.to_owned()),
+                        ..Default::default()
+                    };
 
-                                if let Some(zone_id) = settings.zone_id.as_ref() {
-                                    transport.subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
-                                }
-                            }
+                    loop {
+                        let mut from_app = from_app.lock().await;
+                        select! {
+                            Some((core_event, msg)) = core_rx.recv() => {
+                                match core_event {
+                                    CoreEvent::Found(mut core) => {
+                                        log::info!("Core found: {}, version {}", core.display_name, core.display_version);
 
-                            let io_event = IoEvent::CoreName(Some(paired_core.display_name));
-                            to_app.send(io_event).await.unwrap();
-                        }
-                        CoreEvent::Lost(_) => to_app.send(IoEvent::CoreName(None)).await.unwrap(),
-                        _ => (),
-                    }
+                                        browse = core.get_browse().cloned();
+                                        transport = core.get_transport().cloned();
 
-                    if let Some((msg, parsed)) = msg {
-                        match parsed {
-                            Parsed::RoonState => {
-                                RoonApi::save_config(&config_path, "roonstate", msg).unwrap();
-                            }
-                            Parsed::Zones(zones) => {
-                                for zone in zones {
-                                    zone_map.insert(zone.zone_id.to_owned(), zone);
-                                }
+                                        if let Some(browse) = browse.as_ref() {
+                                            opts.pop_all = true;
 
-                                let mut zones: Vec<(String, String)> = zone_map
-                                    .iter()
-                                    .map(|(zone_id, zone)| {
-                                        (zone_id.to_owned(), zone.display_name.to_owned())
-                                    })
-                                    .collect();
-                                zones.sort_by(|a, b| a.1.cmp(&b.1));
-
-                                to_app.send(IoEvent::Zones(zones)).await.unwrap();
-
-                                if let Some(zone_id) = settings.zone_id.as_deref() {
-                                    if let Some(browse_path) = browse_profile(zone_id, browse.as_ref()).await {
-                                        browse_paths.insert(zone_id.to_owned(), browse_path);
-                                    }
-
-                                    if let Some(zone) = zone_map.get(zone_id) {
-                                        if zone.state != State::Playing {
-                                            if pause_on_track_end {
-                                                pause_on_track_end = false;
-                                                to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
-                                            }
-                                        } else {
-                                            seek_to_end(transport.as_ref(), Some(zone_id), seek_seconds.take()).await;
+                                            browse.browse(&opts).await;
                                         }
 
-                                        if let Some(queue_mode) = sync_queue_mode(&mut settings, zone.settings.auto_radio) {
+                                        if let Some(transport) = transport.as_ref() {
+                                            transport.subscribe_zones().await;
+
+                                            if let Some(zone_id) = settings.zone_id.as_ref() {
+                                                transport.subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
+                                            }
+                                        }
+
+                                        let io_event = IoEvent::CoreName(Some(core.display_name));
+                                        to_app.send(io_event).await.unwrap();
+                                    }
+                                    CoreEvent::Lost(core) => {
+                                        log::warn!("Core lost: {}, version {}", core.display_name, core.display_version);
+                                        to_app.send(IoEvent::CoreName(None)).await.unwrap()
+                                    }
+                                    _ => (),
+                                }
+
+                                if let Some((msg, parsed)) = msg {
+                                    match parsed {
+                                        Parsed::RoonState => {
+                                            RoonApi::save_config(&config_path, "roonstate", msg).unwrap();
+                                        }
+                                        Parsed::Zones(zones) => {
+                                            for zone in zones {
+                                                zone_map.insert(zone.zone_id.to_owned(), zone);
+                                            }
+
+                                            let mut zones: Vec<(String, String)> = zone_map
+                                                .iter()
+                                                .map(|(zone_id, zone)| {
+                                                    (zone_id.to_owned(), zone.display_name.to_owned())
+                                                })
+                                                .collect();
+                                            zones.sort_by(|a, b| a.1.cmp(&b.1));
+
+                                            to_app.send(IoEvent::Zones(zones)).await.unwrap();
+
+                                            if let Some(zone_id) = settings.zone_id.as_deref() {
+                                                if let Some(browse_path) = browse_profile(zone_id, browse.as_ref()).await {
+                                                    browse_paths.insert(zone_id.to_owned(), browse_path);
+                                                }
+
+                                                if let Some(zone) = zone_map.get(zone_id) {
+                                                    if zone.state != State::Playing {
+                                                        if pause_on_track_end {
+                                                            pause_on_track_end = false;
+                                                            to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
+                                                        }
+                                                    } else {
+                                                        seek_to_end(transport.as_ref(), Some(zone_id), seek_seconds.take()).await;
+                                                    }
+
+                                                    if let Some(queue_mode) = sync_queue_mode(&mut settings, zone.settings.auto_radio) {
+                                                        to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
+
+                                                        let settings = settings.serialize(serde_json::value::Serializer).unwrap();
+                                                        RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
+                                                    }
+
+                                                    to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
+                                                }
+                                            }
+                                        }
+                                        Parsed::ZonesRemoved(zone_ids) => {
+                                            if let Some(zone_id) = settings.zone_id.as_ref() {
+                                                if zone_ids.contains(zone_id) {
+                                                    to_app.send(IoEvent::ZoneRemoved(zone_id.to_owned())).await.unwrap();
+                                                }
+                                            }
+
+                                            for zone_id in zone_ids {
+                                                zone_map.remove(&zone_id);
+                                            }
+                                        }
+                                        Parsed::ZonesSeek(seeks) => {
+                                            if let Some(zone_id) = settings.zone_id.as_deref() {
+                                                if let Some(index) = seeks.iter().position(|seek| seek.zone_id == *zone_id) {
+                                                    let seek = seeks[index].to_owned();
+
+                                                    if let Some(seek_position) = seek.seek_position {
+                                                        if seek_position == 0 && pause_on_track_end {
+                                                            control(transport.as_ref(), zone_map.get(zone_id), &Control::Pause).await;
+                                                            pause_on_track_end = false;
+                                                            to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
+                                                        }
+                                                    }
+
+                                                    to_app.send(IoEvent::ZoneSeek(seek)).await.unwrap();
+                                                }
+                                            }
+
+                                            for seek in seeks {
+                                                if seek.queue_time_remaining >= 0 && seek.queue_time_remaining <= 3 {
+                                                    let zone = zone_map.get(&seek.zone_id);
+
+                                                    if let Some(browse_path) = handle_queue_mode(
+                                                        settings.queue_modes.as_ref(),
+                                                        zone,
+                                                        browse.as_ref(),
+                                                        true,
+                                                    ).await {
+                                                        browse_paths.insert(seek.zone_id, browse_path);
+                                                    }
+                                                }
+                                            };
+                                        }
+                                        Parsed::Queue(queue_items) => {
+                                            to_app.send(IoEvent::QueueList(queue_items)).await.unwrap();
+                                        },
+                                        Parsed::QueueChanges(queue_changes) => {
+                                            to_app.send(IoEvent::QueueListChanges(queue_changes)).await.unwrap();
+                                        }
+                                        _ => profiles = handle_browse_response(
+                                            browse.as_ref(),
+                                            &mut browse_paths,
+                                            &to_app,
+                                            parsed,
+                                            settings.profile.as_deref(),
+                                        ).await,
+                                    }
+                                }
+                            }
+                            Some(event) = from_app.recv() => {
+                                // Only one of item_key, pop_all, pop_levels, and refresh_list may be populated
+                                opts.item_key = None;
+                                opts.pop_all = false;
+                                opts.pop_levels = None;
+                                opts.refresh_list = false;
+
+                                match event {
+                                    IoEvent::BrowseSelected(item_key) => {
+                                        let profile = get_profile_name(profiles.as_ref(), item_key.as_deref());
+
+                                        if profile.is_some() {
+                                            if let Some(zone_id) = settings.zone_id.as_ref() {
+                                                settings.profile = profile;
+
+                                                let settings = settings.serialize(serde_json::value::Serializer).unwrap();
+                                                RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
+
+                                                if let Some(browse_path) = browse_profile(zone_id, browse.as_ref()).await {
+                                                    browse_paths.insert(zone_id.to_owned(), browse_path);
+                                                }
+                                            }
+                                        }
+
+                                        if let Some(browse) = browse.as_ref() {
+                                            opts.item_key = item_key;
+                                            opts.zone_or_output_id = settings.zone_id.to_owned();
+
+                                            browse.browse(&opts).await;
+
+                                            opts.input = None;
+                                        }
+                                    }
+                                    IoEvent::BrowseBack => {
+                                        if let Some(browse) = browse.as_ref() {
+                                            opts.pop_levels = Some(1);
+
+                                            browse.browse(&opts).await;
+                                        }
+                                    }
+                                    IoEvent::BrowseRefresh => {
+                                        if let Some(browse) = browse.as_ref() {
+                                            opts.refresh_list = true;
+
+                                            browse.browse(&opts).await;
+                                        }
+                                    }
+                                    IoEvent::BrowseHome => {
+                                        if let Some(browse) = browse.as_ref() {
+                                            opts.pop_all = true;
+
+                                            browse.browse(&opts).await;
+                                        }
+                                    }
+                                    IoEvent::BrowseInput(input) => {
+                                        if let Some(browse) = browse.as_ref() {
+                                            opts.input = Some(input);
+
+                                            browse.browse(&opts).await;
+                                        }
+                                    }
+                                    IoEvent::QueueListLast(item) => queue_end = item,
+                                    IoEvent::QueueSelected(queue_item_id) => {
+                                        if let Some(transport) = transport.as_ref() {
+                                            if let Some(zone_id) = settings.zone_id.as_ref() {
+                                                transport.play_from_here(zone_id, queue_item_id).await;
+                                            }
+                                        }
+                                    }
+                                    IoEvent::QueueClear => {
+                                        seek_seconds = play_queue_end(transport.as_ref(), settings.zone_id.as_deref(), queue_end.as_ref()).await;
+                                    }
+                                    IoEvent::QueueModeNext => {
+                                        if let Some(queue_mode) = select_next_queue_mode(&mut settings) {
                                             to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
+
+                                            let auto_radio = match queue_mode {
+                                                QueueMode::RoonRadio => true,
+                                                _ => false,
+                                            };
+
+                                            set_roon_radio(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), auto_radio).await.unwrap();
 
                                             let settings = settings.serialize(serde_json::value::Serializer).unwrap();
                                             RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
                                         }
-
-                                        to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
                                     }
-                                }
-                            }
-                            Parsed::ZonesRemoved(zone_ids) => {
-                                if let Some(zone_id) = settings.zone_id.as_ref() {
-                                    if zone_ids.contains(zone_id) {
-                                        to_app.send(IoEvent::ZoneRemoved(zone_id.to_owned())).await.unwrap();
-                                    }
-                                }
+                                    IoEvent::QueueModeAppend => {
+                                        if let Some(zone_id) = settings.zone_id.as_deref() {
+                                            let zone = zone_map.get(zone_id);
 
-                                for zone_id in zone_ids {
-                                    zone_map.remove(&zone_id);
-                                }
-                            }
-                            Parsed::ZonesSeek(seeks) => {
-                                if let Some(zone_id) = settings.zone_id.as_deref() {
-                                    if let Some(index) = seeks.iter().position(|seek| seek.zone_id == *zone_id) {
-                                        let seek = seeks[index].to_owned();
-
-                                        if let Some(seek_position) = seek.seek_position {
-                                            if seek_position == 0 && pause_on_track_end {
-                                                control(transport.as_ref(), zone_map.get(zone_id), &Control::Pause).await;
-                                                pause_on_track_end = false;
-                                                to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
+                                            if let Some(browse_path) = handle_queue_mode(
+                                                settings.queue_modes.as_ref(),
+                                                zone,
+                                                browse.as_ref(),
+                                                false,
+                                            ).await {
+                                                browse_paths.insert(zone_id.to_owned(), browse_path);
                                             }
                                         }
-
-                                        to_app.send(IoEvent::ZoneSeek(seek)).await.unwrap();
                                     }
-                                }
+                                    IoEvent::ZoneSelected(zone_id) => {
+                                        if let Some(transport) = transport.as_ref() {
+                                            transport.unsubscribe_queue().await;
+                                            transport.subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
 
-                                for seek in seeks {
-                                    if seek.queue_time_remaining >= 0 && seek.queue_time_remaining <= 3 {
-                                        let zone = zone_map.get(&seek.zone_id);
+                                            let zone = zone_map.get(&zone_id);
 
-                                        if let Some(browse_path) = handle_queue_mode(
-                                            settings.queue_modes.as_ref(),
-                                            zone,
-                                            browse.as_ref(),
-                                            true,
-                                        ).await {
-                                            browse_paths.insert(seek.zone_id, browse_path);
+                                            if let Some(browse_path) = browse_profile(&zone_id, browse.as_ref()).await {
+                                                browse_paths.insert(zone_id.to_owned(), browse_path);
+                                            }
+
+                                            // Store the zone_id in settings before it is used again in sync_queue_mode
+                                            settings.zone_id = Some(zone_id);
+
+                                            if let Some(zone) = zone {
+                                                if let Some(queue_mode) = sync_queue_mode(&mut settings, zone.settings.auto_radio) {
+                                                    to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
+                                                }
+
+                                                to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
+                                            }
+
+                                            let settings = settings.serialize(serde_json::value::Serializer).unwrap();
+                                            RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
                                         }
                                     }
-                                };
-                            }
-                            Parsed::Queue(queue_items) => {
-                                to_app.send(IoEvent::QueueList(queue_items)).await.unwrap();
-                            },
-                            Parsed::QueueChanges(queue_changes) => {
-                                to_app.send(IoEvent::QueueListChanges(queue_changes)).await.unwrap();
-                            }
-                            _ => profiles = handle_browse_response(
-                                browse.as_ref(),
-                                &mut browse_paths,
-                                &to_app,
-                                parsed,
-                                settings.profile.as_deref(),
-                            ).await,
-                        }
-                    }
-                }
-                Some(event) = from_app.recv() => {
-                    // Only one of item_key, pop_all, pop_levels, and refresh_list may be populated
-                    opts.item_key = None;
-                    opts.pop_all = false;
-                    opts.pop_levels = None;
-                    opts.refresh_list = false;
-
-                    match event {
-                        IoEvent::BrowseSelected(item_key) => {
-                            let profile = get_profile_name(profiles.as_ref(), item_key.as_deref());
-
-                            if profile.is_some() {
-                                if let Some(zone_id) = settings.zone_id.as_ref() {
-                                    settings.profile = profile;
-
-                                    let settings = settings.serialize(serde_json::value::Serializer).unwrap();
-                                    RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
-
-                                    if let Some(browse_path) = browse_profile(zone_id, browse.as_ref()).await {
-                                        browse_paths.insert(zone_id.to_owned(), browse_path);
+                                    IoEvent::Mute(how) => {
+                                        mute(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), &how).await;
                                     }
-                                }
-                            }
-
-                            if let Some(browse) = browse.as_ref() {
-                                opts.item_key = item_key;
-                                opts.zone_or_output_id = settings.zone_id.to_owned();
-
-                                browse.browse(&opts).await;
-
-                                opts.input = None;
-                            }
-                        }
-                        IoEvent::BrowseBack => {
-                            if let Some(browse) = browse.as_ref() {
-                                opts.pop_levels = Some(1);
-
-                                browse.browse(&opts).await;
-                            }
-                        }
-                        IoEvent::BrowseRefresh => {
-                            if let Some(browse) = browse.as_ref() {
-                                opts.refresh_list = true;
-
-                                browse.browse(&opts).await;
-                            }
-                        }
-                        IoEvent::BrowseHome => {
-                            if let Some(browse) = browse.as_ref() {
-                                opts.pop_all = true;
-
-                                browse.browse(&opts).await;
-                            }
-                        }
-                        IoEvent::BrowseInput(input) => {
-                            if let Some(browse) = browse.as_ref() {
-                                opts.input = Some(input);
-
-                                browse.browse(&opts).await;
-                            }
-                        }
-                        IoEvent::QueueListLast(item) => queue_end = item,
-                        IoEvent::QueueSelected(queue_item_id) => {
-                            if let Some(transport) = transport.as_ref() {
-                                if let Some(zone_id) = settings.zone_id.as_ref() {
-                                    transport.play_from_here(zone_id, queue_item_id).await;
-                                }
-                            }
-                        }
-                        IoEvent::QueueClear => {
-                            seek_seconds = play_queue_end(transport.as_ref(), settings.zone_id.as_deref(), queue_end.as_ref()).await;
-                        }
-                        IoEvent::QueueModeNext => {
-                            if let Some(queue_mode) = select_next_queue_mode(&mut settings) {
-                                to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
-
-                                let auto_radio = match queue_mode {
-                                    QueueMode::RoonRadio => true,
-                                    _ => false,
-                                };
-
-                                set_roon_radio(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), auto_radio).await.unwrap();
-
-                                let settings = settings.serialize(serde_json::value::Serializer).unwrap();
-                                RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
-                            }
-                        }
-                        IoEvent::QueueModeAppend => {
-                            if let Some(zone_id) = settings.zone_id.as_deref() {
-                                let zone = zone_map.get(zone_id);
-
-                                if let Some(browse_path) = handle_queue_mode(
-                                    settings.queue_modes.as_ref(),
-                                    zone,
-                                    browse.as_ref(),
-                                    false,
-                                ).await {
-                                    browse_paths.insert(zone_id.to_owned(), browse_path);
-                                }
-                            }
-                        }
-                        IoEvent::ZoneSelected(zone_id) => {
-                            if let Some(transport) = transport.as_ref() {
-                                transport.unsubscribe_queue().await;
-                                transport.subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
-
-                                let zone = zone_map.get(&zone_id);
-
-                                if let Some(browse_path) = browse_profile(&zone_id, browse.as_ref()).await {
-                                    browse_paths.insert(zone_id.to_owned(), browse_path);
-                                }
-
-                                // Store the zone_id in settings before it is used again in sync_queue_mode
-                                settings.zone_id = Some(zone_id);
-
-                                if let Some(zone) = zone {
-                                    if let Some(queue_mode) = sync_queue_mode(&mut settings, zone.settings.auto_radio) {
-                                        to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
+                                    IoEvent::ChangeVolume(steps) => {
+                                        change_volume(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), steps).await;
                                     }
+                                    IoEvent::Control(how) => {
+                                        if let Some(zone_id) = settings.zone_id.as_deref() {
+                                            let zone_option = zone_map.get(zone_id);
 
-                                    to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
-                                }
-
-                                let settings = settings.serialize(serde_json::value::Serializer).unwrap();
-                                RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
-                            }
-                        }
-                        IoEvent::Mute(how) => {
-                            mute(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), &how).await;
-                        }
-                        IoEvent::ChangeVolume(steps) => {
-                            change_volume(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), steps).await;
-                        }
-                        IoEvent::Control(how) => {
-                            if let Some(zone_id) = settings.zone_id.as_deref() {
-                                let zone_option = zone_map.get(zone_id);
-
-                                if let Some(zone) = zone_option {
-                                    if zone.now_playing.is_some() {
-                                        control(transport.as_ref(), zone_option, &how).await;
-                                    } else if how == Control::PlayPause {
-                                        if let Some(browse_path) = handle_queue_mode(
-                                            settings.queue_modes.as_ref(),
-                                            zone_option,
-                                            browse.as_ref(),
-                                            true,
-                                        ).await {
-                                            browse_paths.insert(zone_id.to_owned(), browse_path);
+                                            if let Some(zone) = zone_option {
+                                                if zone.now_playing.is_some() {
+                                                    control(transport.as_ref(), zone_option, &how).await;
+                                                } else if how == Control::PlayPause {
+                                                    if let Some(browse_path) = handle_queue_mode(
+                                                        settings.queue_modes.as_ref(),
+                                                        zone_option,
+                                                        browse.as_ref(),
+                                                        true,
+                                                    ).await {
+                                                        browse_paths.insert(zone_id.to_owned(), browse_path);
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
+                                    IoEvent::PauseOnTrackEndReq => {
+                                        pause_on_track_end = handle_pause_on_track_end_req(&settings, &zone_map).unwrap_or_default();
+                                        to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
+                                    }
+                                    _ => (),
                                 }
                             }
                         }
-                        IoEvent::PauseOnTrackEndReq => {
-                            pause_on_track_end = handle_pause_on_track_end_req(&settings, &zone_map).unwrap_or_default();
-                            to_app.send(IoEvent::PauseOnTrackEndActive(pause_on_track_end)).await.unwrap();
-                        }
-                        _ => (),
                     }
-                }
+                });
+
+                handlers.join_next().await;
             }
+            sleep(Duration::from_secs(10)).await;
         }
     });
 }

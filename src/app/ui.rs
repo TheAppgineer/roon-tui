@@ -1,5 +1,4 @@
 use ratatui::{
-    backend::Backend,
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -14,10 +13,7 @@ const ROON_BRAND_COLOR: Color = Color::Rgb(0x75, 0x75, 0xf3);
 const CUSTOM_GRAY: Color = Color::Rgb(0x80, 0x80, 0x80);
 const HIGHLIGHT_SYMBOL: &str = " \u{23f5} ";
 
-pub fn draw<B>(frame: &mut Frame<B>, app: &mut App)
-where
-    B: Backend,
-{
+pub fn draw(frame: &mut Frame, app: &mut App) {
     let size = frame.size();
 
     // Surrounding block
@@ -63,10 +59,7 @@ where
     }
 }
 
-fn draw_browse_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
-where
-    B: Backend,
-{
+fn draw_browse_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let browse_title = format!("{}", app.browse.title.as_deref().unwrap_or("Browse"));
     let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
     let view = Some(&View::Browse);
@@ -149,10 +142,7 @@ where
     frame.render_widget(block, area);
 }
 
-fn draw_queue_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
-where
-    B: Backend,
-{
+fn draw_queue_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
     let view = Some(&View::Queue);
     let mut block = Block::default()
@@ -249,10 +239,7 @@ where
     frame.render_widget(block, area);
 }
 
-fn draw_now_playing_view<B>(frame: &mut Frame<B>, area: Rect, app: &App)
-where
-    B: Backend,
-{
+fn draw_now_playing_view(frame: &mut Frame, area: Rect, app: &App) {
     let view = Some(&View::NowPlaying);
     let mut block = Block::default()
         .borders(Borders::ALL)
@@ -360,17 +347,14 @@ where
     frame.render_widget(block, area);
 }
 
-fn draw_progress_gauge<B>(
-    frame: &mut Frame<B>,
+fn draw_progress_gauge(
+    frame: &mut Frame,
     area: Rect,
     app: &App,
     view: Option<&View>,
     duration: u32,
     seek_position: Option<i64>,
-) -> Option<()>
-where
-    B: Backend,
-{
+) -> Option<()> {
     let elapsed = seek_position? as u32;
     let progress = if duration > 0 {elapsed * 100 / duration} else {0};
     let elapsed = get_time_string(elapsed);
@@ -486,10 +470,7 @@ fn get_status_lines(zone: &Zone, style: Style) -> Vec<Line> {
     ]
 }
 
-fn draw_prompt_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
-where
-    B: Backend,
-{
+fn draw_prompt_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let view = Some(&View::Prompt);
     let area = upper_bar(area);
     let max_len = area.width.saturating_sub(3) as usize;
@@ -525,10 +506,7 @@ where
     );
 }
 
-fn draw_zones_view<B>(frame: &mut Frame<B>, area: Rect, app: &mut App)
-where
-    B: Backend,
-{
+fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let view = Some(&View::Zones);
     let block = Block::default()
         .borders(Borders::ALL)

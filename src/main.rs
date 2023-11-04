@@ -1,9 +1,14 @@
+use std::{fs, panic, path};
+use time::UtcOffset;
 use tokio::sync::mpsc;
 use eyre::Result;
 use clap::Parser;
 use roon_tui::app::App;
 use roon_tui::io::{events::Events, roon::{self, Options}};
 use roon_tui::start_ui;
+use simplelog::{ColorChoice, ConfigBuilder, TerminalMode, TermLogger, WriteLogger, format_description};
+
+const LOG_FILE: &str = concat!(env!("CARGO_PKG_NAME"), ".log");
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -19,6 +24,54 @@ pub struct Args {
     /// Port number of the Server
     #[arg(short, long, default_value = "9330")]
     port: String,
+
+    /// Path to the log file
+    #[arg(short, long, default_value = LOG_FILE)]
+    log: String,
+
+    /// Enable verbose logging to file
+    #[arg(short, long)]
+    verbose: bool,
+}
+
+fn init_logger(log: String, max_log_level: log::LevelFilter) -> Result<()> {
+    let log_path = path::Path::new(&log);
+    let _ = fs::create_dir_all(log_path.parent().unwrap());
+    let time_format = format_description!("[hour]:[minute]:[second].[subsecond]");
+    let seconds = chrono::Local::now().offset().local_minus_utc();
+    let utc_offset = UtcOffset::from_whole_seconds(seconds).unwrap_or(UtcOffset::UTC);
+    let config = ConfigBuilder::new()
+        .set_time_format_custom(time_format)
+        .set_time_offset(utc_offset)
+        .build();
+
+    panic::set_hook(Box::new(|info| {
+        log::error!("{}", info);
+    }));
+
+    match fs::File::create(log) {
+        Ok(log) => {
+            WriteLogger::init(max_log_level, config, log)?;
+        }
+        Err(_) => {
+            TermLogger::init(
+                log::LevelFilter::Warn,
+                config,
+                TerminalMode::Stderr,
+                ColorChoice::Never
+            )?;
+            log::warn!("Logging to stderr");
+        }
+    }
+
+    if utc_offset == UtcOffset::UTC {
+        log::warn!("Timestamps are UTC");
+    }
+    else {
+        log::info!("Timestamps are local time");
+    }
+
+    Ok(())
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -32,12 +85,17 @@ async fn main() -> Result<()> {
         ip: args.ip,
         port: args.port,
     };
+    let max_log_level = if args.verbose {
+        log::LevelFilter::Info
+    } else {
+        log::LevelFilter::Warn
+    };
+
+    let _ = init_logger(args.log, max_log_level);
 
     Events::start(to_app.clone());
 
     roon::start(options, to_app, from_app).await;
 
-    start_ui(&mut app).await?;
-
-    Ok(())
+    start_ui(&mut app).await
 }
