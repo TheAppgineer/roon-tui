@@ -12,6 +12,8 @@ use crate::app::{App, View};
 const ROON_BRAND_COLOR: Color = Color::Rgb(0x75, 0x75, 0xf3);
 const CUSTOM_GRAY: Color = Color::Rgb(0x80, 0x80, 0x80);
 const HIGHLIGHT_SYMBOL: &str = " \u{23f5} ";
+const CHECKED_SYMBOL: &str = "\u{1F5F9}";
+const UNCHECKED_SYMBOL: &str = "\u{2610}";
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let size = frame.size();
@@ -22,13 +24,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         format!(" {} ", name)
     } else {
         app.select_view(None);
-        " No core paired/found ".to_owned()
+        " No Roon Server paired/found ".to_owned()
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, None))
-        .title(Span::styled(title, get_text_view_style(&app, None)))
-        .title(Span::styled(subtitle, get_text_view_style(&app, None)))
+        .border_style(get_border_view_style(app, None))
+        .title(Span::styled(title, get_text_view_style(app, None)))
+        .title(Span::styled(subtitle, get_text_view_style(app, None)))
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Plain);
     frame.render_widget(block, size);
@@ -38,7 +40,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .horizontal_margin(2)
         .vertical_margin(1)
         .constraints([Constraint::Min(8), Constraint::Length(7)].as_ref())
-        .split(frame.size());
+        .split(size);
 
     // Top two inner blocks
     let top_chunks = Layout::default()
@@ -48,14 +50,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     draw_browse_view(frame, top_chunks[0], app);
     draw_queue_view(frame, top_chunks[1], app);
-    draw_now_playing_view(frame, chunks[1], &app);
+    draw_now_playing_view(frame, chunks[1], app);
 
-    if let Some(View::Prompt) = app.selected_view {
-        draw_prompt_view(frame, top_chunks[0], app);
-    }
-
-    if let Some(View::Zones) = app.selected_view {
-        draw_zones_view(frame, top_chunks[1], app);
+    match app.selected_view {
+        Some(View::Prompt) => draw_prompt_view(frame, top_chunks[0], app),
+        Some(View::Zones) => draw_zones_view(frame, top_chunks[1], app),
+        Some(View::Grouping) => draw_grouping_view(frame, top_chunks[1], app),
+        _ => (),
     }
 }
 
@@ -547,6 +548,52 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
 
         // We can now render the item list
         frame.render_stateful_widget(list, area, &mut app.zones.state);
+    }
+
+    frame.render_widget(block, area);
+}
+
+fn draw_grouping_view(frame: &mut Frame, area: Rect, app: &mut App) {
+    let view = Some(&View::Grouping);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(get_border_view_style(&app, view))
+        .title(Span::styled(
+            "Zone Grouping",
+            get_text_view_style(&app, view),
+        ))
+        .title_alignment(Alignment::Left);
+
+    let area = bottom_right_rect(50, 50, area);
+    let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
+
+    frame.render_widget(Clear, area);   // This clears out the background
+
+    app.grouping.prepare_paging(page_lines, |_| 1);
+
+    if let Some(grouping) = app.grouping.items.as_ref() {
+        let items: Vec<ListItem> = grouping
+            .iter()
+            .map(|(_, name, included)| {
+                let state = if *included {CHECKED_SYMBOL} else {UNCHECKED_SYMBOL};
+                let line = Span::styled(
+                    format!("{}  {}", state, name),
+                    get_text_view_style(&app, view));
+                ListItem::new(Line::from(line)).style(Style::default())
+            })
+            .collect();
+
+        // Create a List from all list items and highlight the currently selected one
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL))
+            .highlight_style(
+                Style::default()
+                    .bg(ROON_BRAND_COLOR)
+                    .add_modifier(Modifier::BOLD)
+            );
+
+        // We can now render the item list
+        frame.render_stateful_widget(list, area, &mut app.grouping.state);
     }
 
     frame.render_widget(block, area);

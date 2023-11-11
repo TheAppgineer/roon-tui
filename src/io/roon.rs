@@ -15,7 +15,7 @@ use roon_api::{
     RoonApi,
     Services,
     Svc,
-    transport::{Control, QueueItem, Seek, State, Transport, volume, Zone},
+    transport::{Control, Output, QueueItem, Seek, State, Transport, volume, Zone},
 };
 
 use super::{IoEvent, QueueMode};
@@ -82,6 +82,7 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
                     let mut browse = None;
                     let mut transport = None;
                     let mut zone_map = HashMap::new();
+                    let mut zone_output_ids: Option<Vec<String>> = None;
                     let mut pause_on_track_end = false;
                     let mut browse_paths = HashMap::new();
                     let mut profiles = None;
@@ -94,11 +95,19 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
 
                     loop {
                         let mut from_app = from_app.lock().await;
-                        select! {
-                            Some((core_event, msg)) = core_rx.recv() => {
+                        let event = select! {
+                            core_event = core_rx.recv() => {
+                                (core_event, None)
+                            }
+                            app_event = from_app.recv() => {
+                                (None, app_event)
+                            }
+                        };
+                        match event {
+                            (Some((core_event, msg)), _) => {
                                 match core_event {
                                     CoreEvent::Found(mut core) => {
-                                        log::info!("Core found: {}, version {}", core.display_name, core.display_version);
+                                        log::info!("Roon Server found: {}, version {}", core.display_name, core.display_version);
 
                                         browse = core.get_browse().cloned();
                                         transport = core.get_transport().cloned();
@@ -121,7 +130,7 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
                                         to_app.send(io_event).await.unwrap();
                                     }
                                     CoreEvent::Lost(core) => {
-                                        log::warn!("Core lost: {}, version {}", core.display_name, core.display_version);
+                                        log::warn!("Roon Server lost: {}, version {}", core.display_name, core.display_version);
                                         to_app.send(IoEvent::CoreName(None)).await.unwrap()
                                     }
                                     _ => (),
@@ -133,6 +142,24 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
                                             RoonApi::save_config(&config_path, "roonstate", msg).unwrap();
                                         }
                                         Parsed::Zones(zones) => {
+                                            if let Some(output_ids) = zone_output_ids.take() {
+                                                settings.zone_id = zones.iter()
+                                                    .find_map(|zone| {
+                                                        let count = zone.outputs.iter()
+                                                            .filter(|output| output_ids.contains(&output.output_id))
+                                                            .count();
+
+                                                        if count == output_ids.len() {
+                                                            Some(zone.zone_id.to_owned())
+                                                        } else {
+                                                            None
+                                                        }
+                                                    });
+
+                                                let settings = settings.serialize(serde_json::value::Serializer).unwrap();
+                                                RoonApi::save_config(&config_path, "settings", settings).unwrap();
+                                            }
+
                                             for zone in zones {
                                                 zone_map.insert(zone.zone_id.to_owned(), zone);
                                             }
@@ -166,7 +193,7 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
                                                         to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
 
                                                         let settings = settings.serialize(serde_json::value::Serializer).unwrap();
-                                                        RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
+                                                        RoonApi::save_config(&config_path, "settings", settings).unwrap();
                                                     }
 
                                                     to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
@@ -222,6 +249,14 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
                                         Parsed::QueueChanges(queue_changes) => {
                                             to_app.send(IoEvent::QueueListChanges(queue_changes)).await.unwrap();
                                         }
+                                        Parsed::Outputs(outputs) => {
+                                            if let Some(zone_id) = settings.zone_id.as_deref() {
+                                                let zone = zone_map.get(zone_id);
+                                                let grouping = get_grouping(zone, &outputs);
+
+                                                to_app.send(IoEvent::ZoneGrouping(grouping)).await.unwrap();
+                                            }
+                                        }
                                         _ => profiles = handle_browse_response(
                                             browse.as_ref(),
                                             &mut browse_paths,
@@ -232,7 +267,7 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
                                     }
                                 }
                             }
-                            Some(event) = from_app.recv() => {
+                            (_, Some(event)) => {
                                 // Only one of item_key, pop_all, pop_levels, and refresh_list may be populated
                                 opts.item_key = None;
                                 opts.pop_all = false;
@@ -248,7 +283,7 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
                                                 settings.profile = profile;
 
                                                 let settings = settings.serialize(serde_json::value::Serializer).unwrap();
-                                                RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
+                                                RoonApi::save_config(&config_path, "settings", settings).unwrap();
 
                                                 if let Some(browse_path) = browse_profile(zone_id, browse.as_ref()).await {
                                                     browse_paths.insert(zone_id.to_owned(), browse_path);
@@ -316,7 +351,7 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
                                             set_roon_radio(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), auto_radio).await.unwrap();
 
                                             let settings = settings.serialize(serde_json::value::Serializer).unwrap();
-                                            RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
+                                            RoonApi::save_config(&config_path, "settings", settings).unwrap();
                                         }
                                     }
                                     IoEvent::QueueModeAppend => {
@@ -356,8 +391,29 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
                                             }
 
                                             let settings = settings.serialize(serde_json::value::Serializer).unwrap();
-                                            RoonApi::save_config(&config_path, "settings", settings.to_owned()).unwrap();
+                                            RoonApi::save_config(&config_path, "settings", settings).unwrap();
                                         }
+                                    }
+                                    IoEvent::ZoneGroupReq => {
+                                        if let Some(transport) = transport.as_ref() {
+                                            transport.get_outputs().await;
+                                        }
+                                    }
+                                    IoEvent::ZoneGrouped(output_ids) => {
+                                        ungroup_zone(transport.as_ref(), &zone_map, settings.zone_id.as_deref()).await;
+
+                                        if output_ids.len() > 1 {
+                                            if let Some(transport) = transport.as_ref() {
+                                                let output_ids = output_ids.iter()
+                                                    .map(|output_id| output_id.as_str())
+                                                    .collect();
+
+
+                                                transport.group_outputs(output_ids).await;
+                                            }
+                                        }
+
+                                        zone_output_ids = Some(output_ids);
                                     }
                                     IoEvent::Mute(how) => {
                                         mute(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), &how).await;
@@ -392,15 +448,38 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
                                     _ => (),
                                 }
                             }
+                            (None, None) => (),
                         }
                     }
                 });
 
                 handlers.join_next().await;
             }
+
             sleep(Duration::from_secs(10)).await;
         }
     });
+}
+
+fn get_grouping<'a>(zone: Option<&Zone>, outputs: &Vec<Output>) -> Option<Vec<(String, String, bool)>> {
+    let mut grouping: Vec<(String, String, bool)> = zone?.outputs.iter()
+        .map(|output| (output.output_id.to_owned(), output.display_name.to_owned(), true))
+        .collect();
+    let can_group_with_output_ids = &zone?.outputs.get(0)?.can_group_with_output_ids;
+
+    for output in outputs {
+        if can_group_with_output_ids.contains(&output.output_id) {
+            let is_not_in = grouping.iter()
+                .position(|(output_id, _, _)| *output_id == output.output_id)
+                .is_none();
+
+            if is_not_in {
+                grouping.push((output.output_id.to_owned(), output.display_name.to_owned(), false));
+            }
+        }
+    }
+
+    Some(grouping)
 }
 
 fn handle_pause_on_track_end_req(settings: &Settings, zone_map: &HashMap<String, Zone>) -> Option<bool> {
@@ -732,6 +811,21 @@ async fn seek_to_end(
     seek_seconds: Option<i32>,
 ) -> Option<()> {
     transport?.seek(zone_id?, &Seek::Absolute, seek_seconds?).await;
+
+    Some(())
+}
+
+async fn ungroup_zone(
+    transport: Option<&Transport>,
+    zone_map: &HashMap<String, Zone>,
+    zone_id: Option<&str>,
+) -> Option<()> {
+    let zone = zone_map.get(zone_id?)?;
+    let output_ids:Vec<&str> = zone.outputs.iter()
+        .map(|output| output.output_id.as_str())
+        .collect();
+
+    transport?.ungroup_outputs(output_ids).await;
 
     Some(())
 }

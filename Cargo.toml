@@ -1,6 +1,6 @@
 [package]
 name = "roon-tui"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["The Appgineer <theappgineer@gmail.com>"]
 edition = "2021"
 license-file = "LICENSE"
