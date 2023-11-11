@@ -31,6 +31,7 @@ enum View {
 pub struct App {
     to_roon: mpsc::Sender<IoEvent>,
     from_roon: mpsc::Receiver<IoEvent>,
+    no_unicode_symbols: bool,
     core_name: Option<String>,
     selected_view: Option<View>,
     prev_view: Option<View>,
@@ -51,10 +52,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(to_roon: mpsc::Sender<IoEvent>, from_roon: mpsc::Receiver<IoEvent>) -> Self {
+    pub fn new(to_roon: mpsc::Sender<IoEvent>, from_roon: mpsc::Receiver<IoEvent>, no_unicode_symbols: bool) -> Self {
         Self {
             to_roon,
             from_roon,
+            no_unicode_symbols,
             core_name: None,
             selected_view: None,
             prev_view: None,

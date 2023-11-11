@@ -11,9 +11,12 @@ use crate::app::{App, View};
 
 const ROON_BRAND_COLOR: Color = Color::Rgb(0x75, 0x75, 0xf3);
 const CUSTOM_GRAY: Color = Color::Rgb(0x80, 0x80, 0x80);
-const HIGHLIGHT_SYMBOL: &str = " \u{23f5} ";
-const CHECKED_SYMBOL: &str = "\u{1F5F9}";
-const UNCHECKED_SYMBOL: &str = "\u{2610}";
+const UNI_HIGHLIGHT_SYMBOL: &str = " \u{23f5} ";
+const UNI_CHECKED_SYMBOL: &str = "\u{1F5F9}";
+const UNI_UNCHECKED_SYMBOL: &str = "\u{2610}";
+const HIGHLIGHT_SYMBOL: &str = " > ";
+const CHECKED_SYMBOL: &str = "+";
+const UNCHECKED_SYMBOL: &str = "-";
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let size = frame.size();
@@ -100,6 +103,7 @@ fn draw_browse_view(frame: &mut Frame, area: Rect, app: &mut App) {
             .collect();
 
         // Create a List from all list items and highlight the currently selected one
+        let highlight_symbol = if app.no_unicode_symbols {HIGHLIGHT_SYMBOL} else {UNI_HIGHLIGHT_SYMBOL};
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL))
             .highlight_style(
@@ -107,7 +111,7 @@ fn draw_browse_view(frame: &mut Frame, area: Rect, app: &mut App) {
                     .bg(ROON_BRAND_COLOR)
                     .add_modifier(Modifier::BOLD)
             )
-            .highlight_symbol(HIGHLIGHT_SYMBOL)
+            .highlight_symbol(highlight_symbol)
             .highlight_spacing(HighlightSpacing::Always);
 
         // We can now render the item list
@@ -197,6 +201,7 @@ fn draw_queue_view(frame: &mut Frame, area: Rect, app: &mut App) {
             .collect();
 
         // Create a List from all list items and highlight the currently selected one
+        let highlight_symbol = if app.no_unicode_symbols {HIGHLIGHT_SYMBOL} else {UNI_HIGHLIGHT_SYMBOL};
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL))
             .highlight_style(
@@ -204,7 +209,7 @@ fn draw_queue_view(frame: &mut Frame, area: Rect, app: &mut App) {
                     .bg(ROON_BRAND_COLOR)
                     .add_modifier(Modifier::BOLD)
             )
-            .highlight_symbol(HIGHLIGHT_SYMBOL)
+            .highlight_symbol(highlight_symbol)
             .highlight_spacing(HighlightSpacing::Always);
 
         // We can now render the item list
@@ -537,6 +542,7 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
             .collect();
 
         // Create a List from all list items and highlight the currently selected one
+        let highlight_symbol = if app.no_unicode_symbols {HIGHLIGHT_SYMBOL} else {UNI_HIGHLIGHT_SYMBOL};
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL))
             .highlight_style(
@@ -544,7 +550,7 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
                     .bg(ROON_BRAND_COLOR)
                     .add_modifier(Modifier::BOLD)
             )
-            .highlight_symbol(HIGHLIGHT_SYMBOL);
+            .highlight_symbol(highlight_symbol);
 
         // We can now render the item list
         frame.render_stateful_widget(list, area, &mut app.zones.state);
@@ -572,10 +578,12 @@ fn draw_grouping_view(frame: &mut Frame, area: Rect, app: &mut App) {
     app.grouping.prepare_paging(page_lines, |_| 1);
 
     if let Some(grouping) = app.grouping.items.as_ref() {
+        let checked_symbol = if app.no_unicode_symbols {CHECKED_SYMBOL} else {UNI_CHECKED_SYMBOL};
+        let unchecked_symbol = if app.no_unicode_symbols {UNCHECKED_SYMBOL} else {UNI_UNCHECKED_SYMBOL};
         let items: Vec<ListItem> = grouping
             .iter()
             .map(|(_, name, included)| {
-                let state = if *included {CHECKED_SYMBOL} else {UNCHECKED_SYMBOL};
+                let state = if *included {checked_symbol} else {unchecked_symbol};
                 let line = Span::styled(
                     format!("{}  {}", state, name),
                     get_text_view_style(&app, view));
