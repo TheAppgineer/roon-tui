@@ -400,20 +400,12 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
                                         }
                                     }
                                     IoEvent::ZoneGrouped(output_ids) => {
-                                        ungroup_zone(transport.as_ref(), &zone_map, settings.zone_id.as_deref()).await;
-
-                                        if output_ids.len() > 1 {
-                                            if let Some(transport) = transport.as_ref() {
-                                                let output_ids = output_ids.iter()
-                                                    .map(|output_id| output_id.as_str())
-                                                    .collect();
-
-
-                                                transport.group_outputs(output_ids).await;
-                                            }
-                                        }
-
-                                        zone_output_ids = Some(output_ids);
+                                        zone_output_ids = update_grouping(
+                                            output_ids,
+                                            transport.as_ref(),
+                                            &zone_map,
+                                            settings.zone_id.as_deref()
+                                        ).await;
                                     }
                                     IoEvent::Mute(how) => {
                                         mute(transport.as_ref(), &zone_map, settings.zone_id.as_deref(), &how).await;
@@ -815,17 +807,33 @@ async fn seek_to_end(
     Some(())
 }
 
-async fn ungroup_zone(
+async fn update_grouping(
+    new_ids: Vec<String>,
     transport: Option<&Transport>,
     zone_map: &HashMap<String, Zone>,
     zone_id: Option<&str>,
-) -> Option<()> {
+) -> Option<Vec<String>> {
     let zone = zone_map.get(zone_id?)?;
-    let output_ids:Vec<&str> = zone.outputs.iter()
+    let current_ids: Vec<&str> = zone.outputs.iter()
         .map(|output| output.output_id.as_str())
         .collect();
+    let output_ids: Vec<&str> = new_ids.iter()
+        .map(|output_id| output_id.as_str())
+        .collect();
+    let matches_all = output_ids.len() == current_ids.len()
+        && output_ids.get(0) == current_ids.get(0)
+        && output_ids.iter()
+            .all(|output_id| current_ids.contains(output_id));
 
-    transport?.ungroup_outputs(output_ids).await;
+    if matches_all {
+        None
+    } else {
+        transport?.ungroup_outputs(current_ids).await;
 
-    Some(())
+        if output_ids.len() > 1 {
+            transport?.group_outputs(output_ids).await;
+        }
+
+        Some(new_ids)
+    }
 }
