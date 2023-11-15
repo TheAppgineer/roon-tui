@@ -158,6 +158,11 @@ pub async fn start(options: Options, to_app: mpsc::Sender<IoEvent>, from_app: mp
 
                                                 let settings = settings.serialize(serde_json::value::Serializer).unwrap();
                                                 RoonApi::save_config(&config_path, "settings", settings).unwrap();
+
+                                                if let Some(transport) = transport.as_ref() {
+                                                    // Force full refresh of zone data
+                                                    transport.get_zones().await;
+                                                }
                                             }
 
                                             for zone in zones {

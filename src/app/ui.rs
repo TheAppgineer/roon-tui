@@ -335,6 +335,18 @@ fn draw_now_playing_view(frame: &mut Frame, area: Rect, app: &App) {
                 play_state_title,
                 get_text_view_style(app, view),
             ));
+        } else if app.core_name.is_some() {
+            let msg_block = Block::default()
+                .padding(Padding {
+                    left: 0,
+                    right: 0,
+                    top: 1,
+                    bottom: 0,
+                });
+            let text = Paragraph::new("Go find something to play!")
+                .block(msg_block).alignment(Alignment::Center);
+
+            frame.render_widget(text, hor_chunks[0]);
         }
 
         let status_block = Block::default()
@@ -348,6 +360,24 @@ fn draw_now_playing_view(frame: &mut Frame, area: Rect, app: &App) {
             .block(status_block).alignment(Alignment::Right);
 
         frame.render_widget(text, hor_chunks[1]);
+    } else {
+        let msg_block = Block::default()
+        .padding(Padding {
+            left: 0,
+            right: 0,
+            top: 1,
+            bottom: 0,
+        });
+        let msg = if app.core_name.is_some()  {
+            "No zone selected, use Ctrl-z to select one"
+        } else {
+            "Not paired to a Roon Server (or no server found)\n\
+            Use a Roon Remote and go to Settings->Extensions to enable Roon TUI"
+        };
+        let text = Paragraph::new(msg)
+            .block(msg_block).alignment(Alignment::Center);
+
+        frame.render_widget(text, area);
     }
 
     frame.render_widget(block, area);
