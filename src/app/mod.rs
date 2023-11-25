@@ -26,6 +26,7 @@ enum View {
     Prompt = 3,
     Zones = 4,
     Grouping = 5,
+    Help = 6,
 }
 
 pub struct App {
@@ -156,6 +157,7 @@ impl App {
                             match self.selected_view.as_ref() {
                                 Some(View::Prompt) => self.restore_view(),
                                 Some(View::Zones) => self.restore_view(),
+                                Some(View::Help) => self.restore_view(),
                                 _ => (),
                             }
 
@@ -480,6 +482,7 @@ impl App {
                                     View::Queue => self.handle_queue_key_codes(key).await,
                                     View::Zones => self.handle_zone_key_codes(key).await,
                                     View::Grouping => self.handle_grouping_key_codes(key).await,
+                                    View::Help => self.restore_view(),
                                     _ => (),
                                 }
                             }
@@ -511,12 +514,23 @@ impl App {
                             match selected_view.as_ref() {
                                 Some(View::Prompt) => self.restore_view(),
                                 Some(View::Grouping) => self.restore_view(),
+                                Some(View::Help) => self.restore_view(),
                                 _ => (),
                             }
 
                             self.select_view(Some(View::Zones));
                         }
                         KeyCode::Char('g') => self.to_roon.send(IoEvent::ZoneGroupReq).await.unwrap(),
+                        KeyCode::Char('h') => {
+                            match selected_view.as_ref() {
+                                Some(View::Prompt) => self.restore_view(),
+                                Some(View::Zones) => self.restore_view(),
+                                Some(View::Grouping) => self.restore_view(),
+                                _ => (),
+                            }
+
+                            self.select_view(Some(View::Help));
+                        }
                         KeyCode::Char('c') => return AppReturn::Exit,
                         _ => (),
                     }

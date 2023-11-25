@@ -134,6 +134,7 @@ In the Random Album and Random Track mode new entries can be added to the Queue 
 |Ctrl-&larr;|Previous track
 |Ctrl-q|Toggle through Queue Modes
 |Ctrl-a|Append tracks according Queue Mode
+|Ctrl-h|Open help screen
 |Ctrl-c|Quit
 ### Common list controls
 |||

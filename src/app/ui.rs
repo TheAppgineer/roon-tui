@@ -29,13 +29,20 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         app.select_view(None);
         " No Roon Server paired/found ".to_owned()
     };
+    let hint = Title::from(
+            Span::styled(" Ctrl-h for Help ", Style::default().fg(Color::Reset))
+        )
+        .position(Position::Bottom)
+        .alignment(Alignment::Center);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(get_border_view_style(app, None))
         .title(Span::styled(title, get_text_view_style(app, None)))
         .title(Span::styled(subtitle, get_text_view_style(app, None)))
+        .title(hint)
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Plain);
+
     frame.render_widget(block, size);
 
     let chunks = Layout::default()
@@ -59,6 +66,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Some(View::Prompt) => draw_prompt_view(frame, top_chunks[0], app),
         Some(View::Zones) => draw_zones_view(frame, top_chunks[1], app),
         Some(View::Grouping) => draw_grouping_view(frame, top_chunks[1], app),
+        Some(View::Help) => draw_help_view(frame, size, app),
         _ => (),
     }
 }
@@ -350,24 +358,24 @@ fn draw_now_playing_view(frame: &mut Frame, area: Rect, app: &App) {
         }
 
         let status_block = Block::default()
-        .padding(Padding {
-            left: 1,
-            right: 2,
-            top: 1,
-            bottom: 0,
-        });
+            .padding(Padding {
+                left: 1,
+                right: 2,
+                top: 1,
+                bottom: 0,
+            });
         let text = Paragraph::new(get_status_lines(zone, style))
             .block(status_block).alignment(Alignment::Right);
 
         frame.render_widget(text, hor_chunks[1]);
     } else {
         let msg_block = Block::default()
-        .padding(Padding {
-            left: 0,
-            right: 0,
-            top: 1,
-            bottom: 0,
-        });
+            .padding(Padding {
+                left: 0,
+                right: 0,
+                top: 1,
+                bottom: 0,
+            });
         let msg = if app.core_name.is_some()  {
             "No zone selected, use Ctrl-z to select one"
         } else {
@@ -635,6 +643,129 @@ fn draw_grouping_view(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 
     frame.render_widget(block, area);
+}
+
+fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
+    let view = Some(&View::Help);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(get_border_view_style(&app, view))
+        .title(Span::styled(
+            "Help",
+            get_text_view_style(&app, view),
+        ))
+        .title_alignment(Alignment::Left);
+    let chunk = Layout::default()
+        .direction(Direction::Horizontal)
+        .horizontal_margin(2)
+        .vertical_margin(1)
+        .constraints([Constraint::Percentage(100)])
+        .split(area);
+    let hor_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .horizontal_margin(2)
+        .constraints([
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33)].as_ref())
+        .split(chunk[0]);
+    let max_entries: usize = (hor_chunks[0].height as usize).saturating_sub(2);
+    let text = [
+        "__Global__",
+        "Tab     Next view",
+        "Sh-Tab  Previous view",
+        "Ctrl-z  Select zone",
+        "Ctrl-g  Group zones",
+        "Ctrl-Sp Play/Pause",
+        "Ctrl-p  Play/Pause",
+        "Ctrl-e  Pause at end",
+        "Ctrl-Up Volume up",
+        "Ctrl-Dn Volume down",
+        "Ctrl-Ri Next track",
+        "Ctrl-Le Previous track",
+        "Ctrl-q  Queue mode",
+        "Ctrl-a  Append queue",
+        "Ctrl-h  This help page",
+        "Ctrl-q  Quit",
+        "",
+        "__List Controls__",
+        "Up      Move up",
+        "Down    Move down",
+        "Home    Move to top",
+        "End     Move to bottom",
+        "Page-Up Move page up",
+        "Page-Dn Move page down",
+        "",
+        "__Browse View__",
+        "Enter   Select",
+        "Esc     Move level up",
+        "Ctrl-Hm Browse home",
+        "F5      Refresh",
+        "a..z    Char jump",
+        "Backsp  Prev char jump",
+        "",
+        "__Queue View__",
+        "Enter   Play from here",
+        "",
+        "__Now Playing View__",
+        "m       Mute",
+        "u       Unmute",
+        "+       Volume up",
+        "-       Volume down",
+        "",
+        "__Search Popup__",
+        "Enter   Search input",
+        "Esc     Back to Browse",
+        "",
+        "__Zone Select Popup__",
+        "Enter   Select zone",
+        "Esc     Back to view",
+        "",
+        "__Zone Grouping popup__",
+        "Space   Toggle output",
+        "Enter   Activate group",
+        "Esc     Back to view",
+    ];
+
+    frame.render_widget(Clear, chunk[0]);   // This clears out the background
+
+    for column in 0..hor_chunks.len() {
+        let start = column * max_entries;
+        let end = (start + max_entries).clamp(start, text.len());
+
+        frame.render_widget(create_paragraph(&text[start..end]), hor_chunks[column]);
+
+        if end == text.len() {
+            break;
+        }
+    }
+
+    frame.render_widget(block, chunk[0]);
+}
+
+fn create_paragraph<'a>(text: &'a[&str]) -> Paragraph<'a> {
+    let block = Block::default()
+        .padding(Padding {
+            left: 1,
+            right: 1,
+            top: 1,
+            bottom: 0,
+        });
+    let style = Style::default().fg(Color::Reset);
+    let mut lines = Vec::new();
+
+    for line in text {
+        if line.starts_with("__") && line.ends_with("__") {
+            let bold_line = &line[2..line.len().saturating_sub(2)];
+            let bold_style = style.add_modifier(Modifier::BOLD);
+
+            lines.push(Line::from(Span::styled(bold_line, bold_style)))
+        } else {
+            lines.push(Line::from(Span::styled(*line, style)))
+        }
+    }
+
+    Paragraph::new(lines).block(block)
 }
 
 fn get_border_view_style(app: &App, view: Option<&View>) -> Style {
