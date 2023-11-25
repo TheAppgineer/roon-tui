@@ -42,13 +42,14 @@ There are command line options available to change from the default behavior, an
 Usage: roon-tui [OPTIONS]
 
 Options:
-  -c, --config <CONFIG>  Path to the config.json file [default: config.json]
-  -i, --ip <IP>          IP address of the Server, disables server discovery
-  -p, --port <PORT>      Port number of the Server [default: 9330]
-  -l, --log <LOG>        Path to the log file [default: roon-tui.log]
-  -v, --verbose          Enable verbose logging to file
-  -h, --help             Print help
-  -V, --version          Print version
+  -c, --config <CONFIG>     Path to the config.json file [default: config.json]
+  -i, --ip <IP>             IP address of the Server, disables server discovery
+  -p, --port <PORT>         Port number of the Server [default: 9330]
+  -l, --log <LOG>           Path to the log file [default: roon-tui.log]
+  -v, --verbose             Enable verbose logging to file
+  -u, --no-unicode-symbols  Disable the use of Unicode symbols
+  -h, --help                Print help
+  -V, --version             Print version
 ```
 
 #### Specifying Configuration File
@@ -74,6 +75,16 @@ By default only warnings and errors (including panics) are written to the log fi
 
 The verbose option is meant to track down any issues, might they occur. Normally it is not adviced to use it as it results in large log files.
 
+#### Avoiding Unicode Symbols
+Roon TUI uses some unicode symbols to improve on looks. If these symbols are not correctly displayed by the terminal they can be avoided by using the `--no-unicode-symbols` option.
+
+![Roon TUI unicode symbols](images/unicode-symbols.png)
+
+### Zone Selection and Grouping
+The Roon zone that is controlled by Roon TUI is shown in the lower right corner and can be changed by using `Ctrl-z`.
+
+The grouping of zones can be viewed and changed by using `Ctr-g`. Ouputs are added or removed from the group by using `Space`, the grouping is activated by using `Enter`.
+
 ### Multi-character Jump in Browse View
 After a list of Artists, Albums, etc. is selected, and it is known what to play, a name can be directly typed in the Browse View. The first item that matches the input will be selected. The currently matched characters are displayed in the lower left corner of the view. The Backspace key can be used to revert to previous selections, the Home keys clears the complete input.
 
@@ -85,7 +96,9 @@ Some important remarks:
 * Any unicode characters in items are converted to closest ASCII match before matching takes place
 
 ### Queue Modes
-Queue Modes are used to add something new to the Queue when it runs out of music. Every Roon user is familiar with these two modes:
+Queue Modes are used to add something new to the Queue when it runs out of music, toggle between Queue Modes by using `Ctrl-q`.
+
+Every Roon user is familiar with these two modes:
 #### Manual
 In the Manual Queue Mode playback stops when the queue runs out. New music has to be added manually by browsing the library.
 #### Roon Radio
@@ -112,6 +125,7 @@ In the Random Album and Random Track mode new entries can be added to the Queue 
 |Tab|Switch between views
 |Shift-Tab|Reverse switch between views
 |Ctrl-z|Open zone selector
+|Ctrl-g|Open zone grouping
 |Ctrl-Space, Ctrl-p|Play / Pause
 |Ctrl-e|Pause at End of Track
 |Ctrl-&uarr;|Volume up
@@ -120,6 +134,7 @@ In the Random Album and Random Track mode new entries can be added to the Queue 
 |Ctrl-&larr;|Previous track
 |Ctrl-q|Toggle through Queue Modes
 |Ctrl-a|Append tracks according Queue Mode
+|Ctrl-h|Open help screen
 |Ctrl-c|Quit
 ### Common list controls
 |||
@@ -159,4 +174,11 @@ In the Random Album and Random Track mode new entries can be added to the Queue 
 |||
 |---|---|
 |Enter|Select Zone
+|Esc|Back to previous view
+
+### Zone Grouping Popup
+|||
+|---|---|
+|Space|Add or remove output from group
+|Enter|Activate Grouping
 |Esc|Back to previous view

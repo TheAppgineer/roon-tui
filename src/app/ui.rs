@@ -11,7 +11,12 @@ use crate::app::{App, View};
 
 const ROON_BRAND_COLOR: Color = Color::Rgb(0x75, 0x75, 0xf3);
 const CUSTOM_GRAY: Color = Color::Rgb(0x80, 0x80, 0x80);
-const HIGHLIGHT_SYMBOL: &str = " \u{23f5} ";
+const UNI_HIGHLIGHT_SYMBOL: &str = " \u{23f5} ";
+const UNI_CHECKED_SYMBOL: &str = "\u{1F5F9}";
+const UNI_UNCHECKED_SYMBOL: &str = "\u{2610}";
+const HIGHLIGHT_SYMBOL: &str = " > ";
+const CHECKED_SYMBOL: &str = "+";
+const UNCHECKED_SYMBOL: &str = "-";
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let size = frame.size();
@@ -22,15 +27,22 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         format!(" {} ", name)
     } else {
         app.select_view(None);
-        " No core paired/found ".to_owned()
+        " No Roon Server paired/found ".to_owned()
     };
+    let hint = Title::from(
+            Span::styled(" Ctrl-h for Help ", Style::default().fg(Color::Reset))
+        )
+        .position(Position::Bottom)
+        .alignment(Alignment::Center);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, None))
-        .title(Span::styled(title, get_text_view_style(&app, None)))
-        .title(Span::styled(subtitle, get_text_view_style(&app, None)))
+        .border_style(get_border_view_style(app, None))
+        .title(Span::styled(title, get_text_view_style(app, None)))
+        .title(Span::styled(subtitle, get_text_view_style(app, None)))
+        .title(hint)
         .title_alignment(Alignment::Center)
         .border_type(BorderType::Plain);
+
     frame.render_widget(block, size);
 
     let chunks = Layout::default()
@@ -38,7 +50,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .horizontal_margin(2)
         .vertical_margin(1)
         .constraints([Constraint::Min(8), Constraint::Length(7)].as_ref())
-        .split(frame.size());
+        .split(size);
 
     // Top two inner blocks
     let top_chunks = Layout::default()
@@ -48,14 +60,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
     draw_browse_view(frame, top_chunks[0], app);
     draw_queue_view(frame, top_chunks[1], app);
-    draw_now_playing_view(frame, chunks[1], &app);
+    draw_now_playing_view(frame, chunks[1], app);
 
-    if let Some(View::Prompt) = app.selected_view {
-        draw_prompt_view(frame, top_chunks[0], app);
-    }
-
-    if let Some(View::Zones) = app.selected_view {
-        draw_zones_view(frame, top_chunks[1], app);
+    match app.selected_view {
+        Some(View::Prompt) => draw_prompt_view(frame, top_chunks[0], app),
+        Some(View::Zones) => draw_zones_view(frame, top_chunks[1], app),
+        Some(View::Grouping) => draw_grouping_view(frame, top_chunks[1], app),
+        Some(View::Help) => draw_help_view(frame, size, app),
+        _ => (),
     }
 }
 
@@ -99,6 +111,7 @@ fn draw_browse_view(frame: &mut Frame, area: Rect, app: &mut App) {
             .collect();
 
         // Create a List from all list items and highlight the currently selected one
+        let highlight_symbol = if app.no_unicode_symbols {HIGHLIGHT_SYMBOL} else {UNI_HIGHLIGHT_SYMBOL};
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL))
             .highlight_style(
@@ -106,7 +119,7 @@ fn draw_browse_view(frame: &mut Frame, area: Rect, app: &mut App) {
                     .bg(ROON_BRAND_COLOR)
                     .add_modifier(Modifier::BOLD)
             )
-            .highlight_symbol(HIGHLIGHT_SYMBOL)
+            .highlight_symbol(highlight_symbol)
             .highlight_spacing(HighlightSpacing::Always);
 
         // We can now render the item list
@@ -196,6 +209,7 @@ fn draw_queue_view(frame: &mut Frame, area: Rect, app: &mut App) {
             .collect();
 
         // Create a List from all list items and highlight the currently selected one
+        let highlight_symbol = if app.no_unicode_symbols {HIGHLIGHT_SYMBOL} else {UNI_HIGHLIGHT_SYMBOL};
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL))
             .highlight_style(
@@ -203,7 +217,7 @@ fn draw_queue_view(frame: &mut Frame, area: Rect, app: &mut App) {
                     .bg(ROON_BRAND_COLOR)
                     .add_modifier(Modifier::BOLD)
             )
-            .highlight_symbol(HIGHLIGHT_SYMBOL)
+            .highlight_symbol(highlight_symbol)
             .highlight_spacing(HighlightSpacing::Always);
 
         // We can now render the item list
@@ -329,19 +343,49 @@ fn draw_now_playing_view(frame: &mut Frame, area: Rect, app: &App) {
                 play_state_title,
                 get_text_view_style(app, view),
             ));
+        } else if app.core_name.is_some() {
+            let msg_block = Block::default()
+                .padding(Padding {
+                    left: 0,
+                    right: 0,
+                    top: 1,
+                    bottom: 0,
+                });
+            let text = Paragraph::new("Go find something to play!")
+                .block(msg_block).alignment(Alignment::Center);
+
+            frame.render_widget(text, hor_chunks[0]);
         }
 
         let status_block = Block::default()
-        .padding(Padding {
-            left: 1,
-            right: 2,
-            top: 1,
-            bottom: 0,
-        });
+            .padding(Padding {
+                left: 1,
+                right: 2,
+                top: 1,
+                bottom: 0,
+            });
         let text = Paragraph::new(get_status_lines(zone, style))
             .block(status_block).alignment(Alignment::Right);
 
         frame.render_widget(text, hor_chunks[1]);
+    } else {
+        let msg_block = Block::default()
+            .padding(Padding {
+                left: 0,
+                right: 0,
+                top: 1,
+                bottom: 0,
+            });
+        let msg = if app.core_name.is_some()  {
+            "No zone selected, use Ctrl-z to select one"
+        } else {
+            "Not paired to a Roon Server (or no server found)\n\
+            Use a Roon Remote and go to Settings->Extensions to enable Roon TUI"
+        };
+        let text = Paragraph::new(msg)
+            .block(msg_block).alignment(Alignment::Center);
+
+        frame.render_widget(text, area);
     }
 
     frame.render_widget(block, area);
@@ -536,6 +580,7 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
             .collect();
 
         // Create a List from all list items and highlight the currently selected one
+        let highlight_symbol = if app.no_unicode_symbols {HIGHLIGHT_SYMBOL} else {UNI_HIGHLIGHT_SYMBOL};
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL))
             .highlight_style(
@@ -543,13 +588,184 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
                     .bg(ROON_BRAND_COLOR)
                     .add_modifier(Modifier::BOLD)
             )
-            .highlight_symbol(HIGHLIGHT_SYMBOL);
+            .highlight_symbol(highlight_symbol);
 
         // We can now render the item list
         frame.render_stateful_widget(list, area, &mut app.zones.state);
     }
 
     frame.render_widget(block, area);
+}
+
+fn draw_grouping_view(frame: &mut Frame, area: Rect, app: &mut App) {
+    let view = Some(&View::Grouping);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(get_border_view_style(&app, view))
+        .title(Span::styled(
+            "Zone Grouping",
+            get_text_view_style(&app, view),
+        ))
+        .title_alignment(Alignment::Left);
+
+    let area = bottom_right_rect(50, 50, area);
+    let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
+
+    frame.render_widget(Clear, area);   // This clears out the background
+
+    app.grouping.prepare_paging(page_lines, |_| 1);
+
+    if let Some(grouping) = app.grouping.items.as_ref() {
+        let checked_symbol = if app.no_unicode_symbols {CHECKED_SYMBOL} else {UNI_CHECKED_SYMBOL};
+        let unchecked_symbol = if app.no_unicode_symbols {UNCHECKED_SYMBOL} else {UNI_UNCHECKED_SYMBOL};
+        let items: Vec<ListItem> = grouping
+            .iter()
+            .map(|(_, name, included)| {
+                let state = if *included {checked_symbol} else {unchecked_symbol};
+                let line = Span::styled(
+                    format!("{}  {}", state, name),
+                    get_text_view_style(&app, view));
+                ListItem::new(Line::from(line)).style(Style::default())
+            })
+            .collect();
+
+        // Create a List from all list items and highlight the currently selected one
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL))
+            .highlight_style(
+                Style::default()
+                    .bg(ROON_BRAND_COLOR)
+                    .add_modifier(Modifier::BOLD)
+            );
+
+        // We can now render the item list
+        frame.render_stateful_widget(list, area, &mut app.grouping.state);
+    }
+
+    frame.render_widget(block, area);
+}
+
+fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
+    let view = Some(&View::Help);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(get_border_view_style(&app, view))
+        .title(Span::styled(
+            "Help",
+            get_text_view_style(&app, view),
+        ))
+        .title_alignment(Alignment::Left);
+    let chunk = Layout::default()
+        .direction(Direction::Horizontal)
+        .horizontal_margin(2)
+        .vertical_margin(1)
+        .constraints([Constraint::Percentage(100)])
+        .split(area);
+    let hor_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .horizontal_margin(2)
+        .constraints([
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33)].as_ref())
+        .split(chunk[0]);
+    let max_entries: usize = (hor_chunks[0].height as usize).saturating_sub(2);
+    let text = [
+        "__Global__",
+        "Tab     Next view",
+        "Sh-Tab  Previous view",
+        "Ctrl-z  Select zone",
+        "Ctrl-g  Group zones",
+        "Ctrl-Sp Play/Pause",
+        "Ctrl-p  Play/Pause",
+        "Ctrl-e  Pause at end",
+        "Ctrl-Up Volume up",
+        "Ctrl-Dn Volume down",
+        "Ctrl-Ri Next track",
+        "Ctrl-Le Previous track",
+        "Ctrl-q  Queue mode",
+        "Ctrl-a  Append queue",
+        "Ctrl-h  This help page",
+        "Ctrl-q  Quit",
+        "",
+        "__List Controls__",
+        "Up      Move up",
+        "Down    Move down",
+        "Home    Move to top",
+        "End     Move to bottom",
+        "Page-Up Move page up",
+        "Page-Dn Move page down",
+        "",
+        "__Browse View__",
+        "Enter   Select",
+        "Esc     Move level up",
+        "Ctrl-Hm Browse home",
+        "F5      Refresh",
+        "a..z    Char jump",
+        "Backsp  Prev char jump",
+        "",
+        "__Queue View__",
+        "Enter   Play from here",
+        "",
+        "__Now Playing View__",
+        "m       Mute",
+        "u       Unmute",
+        "+       Volume up",
+        "-       Volume down",
+        "",
+        "__Search Popup__",
+        "Enter   Search input",
+        "Esc     Back to Browse",
+        "",
+        "__Zone Select Popup__",
+        "Enter   Select zone",
+        "Esc     Back to view",
+        "",
+        "__Zone Grouping popup__",
+        "Space   Toggle output",
+        "Enter   Activate group",
+        "Esc     Back to view",
+    ];
+
+    frame.render_widget(Clear, chunk[0]);   // This clears out the background
+
+    for column in 0..hor_chunks.len() {
+        let start = column * max_entries;
+        let end = (start + max_entries).clamp(start, text.len());
+
+        frame.render_widget(create_paragraph(&text[start..end]), hor_chunks[column]);
+
+        if end == text.len() {
+            break;
+        }
+    }
+
+    frame.render_widget(block, chunk[0]);
+}
+
+fn create_paragraph<'a>(text: &'a[&str]) -> Paragraph<'a> {
+    let block = Block::default()
+        .padding(Padding {
+            left: 1,
+            right: 1,
+            top: 1,
+            bottom: 0,
+        });
+    let style = Style::default().fg(Color::Reset);
+    let mut lines = Vec::new();
+
+    for line in text {
+        if line.starts_with("__") && line.ends_with("__") {
+            let bold_line = &line[2..line.len().saturating_sub(2)];
+            let bold_style = style.add_modifier(Modifier::BOLD);
+
+            lines.push(Line::from(Span::styled(bold_line, bold_style)))
+        } else {
+            lines.push(Line::from(Span::styled(*line, style)))
+        }
+    }
+
+    Paragraph::new(lines).block(block)
 }
 
 fn get_border_view_style(app: &App, view: Option<&View>) -> Style {

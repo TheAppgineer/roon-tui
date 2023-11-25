@@ -32,6 +32,10 @@ pub struct Args {
     /// Enable verbose logging to file
     #[arg(short, long)]
     verbose: bool,
+
+    /// Disable the use of Unicode symbols
+    #[arg(short='u', long)]
+    no_unicode_symbols: bool,
 }
 
 fn init_logger(log: String, max_log_level: log::LevelFilter) -> Result<()> {
@@ -78,8 +82,8 @@ fn init_logger(log: String, max_log_level: log::LevelFilter) -> Result<()> {
 async fn main() -> Result<()> {
     let (to_app, from_roon) = mpsc::channel(10);
     let (to_roon, from_app) = mpsc::channel(10);
-    let mut app = App::new(to_roon, from_roon);
     let args = Args::parse();
+    let mut app = App::new(to_roon, from_roon, args.no_unicode_symbols);
     let options = Options {
         config: args.config,
         ip: args.ip,

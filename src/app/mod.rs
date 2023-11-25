@@ -25,11 +25,14 @@ enum View {
     NowPlaying = 2,
     Prompt = 3,
     Zones = 4,
+    Grouping = 5,
+    Help = 6,
 }
 
 pub struct App {
     to_roon: mpsc::Sender<IoEvent>,
     from_roon: mpsc::Receiver<IoEvent>,
+    no_unicode_symbols: bool,
     core_name: Option<String>,
     selected_view: Option<View>,
     prev_view: Option<View>,
@@ -43,16 +46,18 @@ pub struct App {
     zones: StatefulList<(String, String)>,
     selected_zone: Option<Zone>,
     zone_seek: Option<ZoneSeek>,
+    grouping: StatefulList<(String, String, bool)>,
     queue: StatefulList<QueueItem>,
     pause_on_track_end: bool,
     queue_mode: Option<&'static str>,
 }
 
 impl App {
-    pub fn new(to_roon: mpsc::Sender<IoEvent>, from_roon: mpsc::Receiver<IoEvent>) -> Self {
+    pub fn new(to_roon: mpsc::Sender<IoEvent>, from_roon: mpsc::Receiver<IoEvent>, no_unicode_symbols: bool) -> Self {
         Self {
             to_roon,
             from_roon,
+            no_unicode_symbols,
             core_name: None,
             selected_view: None,
             prev_view: None,
@@ -66,6 +71,7 @@ impl App {
             zones: StatefulList::new(),
             selected_zone: None,
             zone_seek: None,
+            grouping: StatefulList::new(),
             queue: StatefulList::new(),
             pause_on_track_end: false,
             queue_mode: None,
@@ -145,6 +151,22 @@ impl App {
                 }
                 IoEvent::ZoneRemoved(_) => self.selected_zone = None,
                 IoEvent::ZoneSeek(seek) => self.zone_seek = Some(seek),
+                IoEvent::ZoneGrouping(grouping) => {
+                    if let Some(grouping) = grouping.as_ref() {
+                        if !grouping.is_empty() {
+                            match self.selected_view.as_ref() {
+                                Some(View::Prompt) => self.restore_view(),
+                                Some(View::Zones) => self.restore_view(),
+                                Some(View::Help) => self.restore_view(),
+                                _ => (),
+                            }
+
+                            self.select_view(Some(View::Grouping));
+                        }
+                    }
+
+                    self.grouping.items = grouping;
+                }
                 IoEvent::PauseOnTrackEndActive(pause_on_track_end) => self.pause_on_track_end = pause_on_track_end,
                 _ => ()
             }
@@ -199,11 +221,13 @@ impl App {
                         self.browse.select(None);
                         self.queue.deselect();
                         self.zones.deselect();
+                        self.grouping.deselect();
                     }
                     View::Queue => {
                         self.browse.deselect();
                         self.queue.select(None);
                         self.zones.deselect();
+                        self.grouping.deselect();
                     }
                     View::Zones => {
                         let index = if let Some(zone) = &self.selected_zone {
@@ -221,11 +245,19 @@ impl App {
                         self.zones.select(index);
                         self.queue.deselect();
                         self.browse.deselect();
+                        self.grouping.deselect();
+                    }
+                    View::Grouping => {
+                        self.grouping.select(None);
+                        self.browse.deselect();
+                        self.queue.deselect();
+                        self.zones.deselect();
                     }
                     _  => {
                         self.browse.deselect();
                         self.queue.deselect();
                         self.zones.deselect();
+                        self.grouping.deselect();
                     }
                 };
             }
@@ -233,6 +265,7 @@ impl App {
                 self.browse.deselect();
                 self.queue.deselect();
                 self.zones.deselect();
+                self.grouping.deselect();
             }
         }
 
@@ -448,6 +481,8 @@ impl App {
                                     View::NowPlaying => self.handle_now_playing_key_codes(key).await,
                                     View::Queue => self.handle_queue_key_codes(key).await,
                                     View::Zones => self.handle_zone_key_codes(key).await,
+                                    View::Grouping => self.handle_grouping_key_codes(key).await,
+                                    View::Help => self.restore_view(),
                                     _ => (),
                                 }
                             }
@@ -476,11 +511,25 @@ impl App {
                         KeyCode::Char('q') => self.to_roon.send(IoEvent::QueueModeNext).await.unwrap(),
                         KeyCode::Char('a') => self.to_roon.send(IoEvent::QueueModeAppend).await.unwrap(),
                         KeyCode::Char('z') => {
-                            if let Some(View::Prompt) = selected_view.as_ref() {
-                                self.restore_view();
+                            match selected_view.as_ref() {
+                                Some(View::Prompt) => self.restore_view(),
+                                Some(View::Grouping) => self.restore_view(),
+                                Some(View::Help) => self.restore_view(),
+                                _ => (),
                             }
 
                             self.select_view(Some(View::Zones));
+                        }
+                        KeyCode::Char('g') => self.to_roon.send(IoEvent::ZoneGroupReq).await.unwrap(),
+                        KeyCode::Char('h') => {
+                            match selected_view.as_ref() {
+                                Some(View::Prompt) => self.restore_view(),
+                                Some(View::Zones) => self.restore_view(),
+                                Some(View::Grouping) => self.restore_view(),
+                                _ => (),
+                            }
+
+                            self.select_view(Some(View::Help));
                         }
                         KeyCode::Char('c') => return AppReturn::Exit,
                         _ => (),
@@ -652,6 +701,41 @@ impl App {
 
                 if let Some(zone_id) = selected_zone_id.as_ref() {
                     self.to_roon.send(IoEvent::ZoneSelected(zone_id.to_owned())).await.unwrap();
+                }
+            }
+            KeyCode::Esc => self.restore_view(),
+            _ => (),
+        }
+    }
+
+    async fn handle_grouping_key_codes(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Up => self.grouping.prev(),
+            KeyCode::Down => self.grouping.next(),
+            KeyCode::Home => self.grouping.select_first(),
+            KeyCode::End => self.grouping.select_last(),
+            KeyCode::PageUp => self.grouping.select_prev_page(),
+            KeyCode::PageDown => self.grouping.select_next_page(),
+            KeyCode::Char(' ') => {
+                if let Some(item) = self.grouping.get_selected_item_mut() {
+                    item.2 = !item.2;
+                }
+            }
+            KeyCode::Enter => {
+                self.restore_view();
+
+                if let Some(items) = self.grouping.items.as_ref() {
+                    let output_ids:Vec<String> = items.iter()
+                        .filter_map(|(output_id, _, included)| {
+                            if *included {
+                                Some(output_id.to_owned())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    self.to_roon.send(IoEvent::ZoneGrouped(output_ids)).await.unwrap();
                 }
             }
             KeyCode::Esc => self.restore_view(),

@@ -148,7 +148,7 @@ impl<T> StatefulList<T> {
             if let Some(items) = self.items.as_ref() {
                 for item in items.iter() {
                     let line_count = f(item);
-    
+
                     item_line_count.push(line_count);
                 }
             }
@@ -160,8 +160,13 @@ impl<T> StatefulList<T> {
 
     pub fn get_selected_item(&self) -> Option<&T> {
         let index = self.state.selected()?;
-        let item = self.items.as_ref()?.get(index);
 
-        item
+        self.items.as_ref()?.get(index)
+    }
+
+    pub fn get_selected_item_mut(&mut self) -> Option<&mut T> {
+        let index = self.state.selected()?;
+
+        self.items.as_mut()?.get_mut(index)
     }
 }
