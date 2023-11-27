@@ -721,7 +721,7 @@ fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
         "Enter   Select zone",
         "Esc     Back to view",
         "",
-        "__Zone Grouping popup__",
+        "__Zone Grouping Popup__",
         "Space   Toggle output",
         "Enter   Activate group",
         "Esc     Back to view",

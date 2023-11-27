@@ -40,13 +40,13 @@ struct Settings {
 struct RoonHandler {
     to_app: Sender<IoEvent>,
     config_path: Arc<String>,
-    primary_browse_key: &'static str,
     settings: Settings,
     browse: Option<Browse>,
     transport: Option<Transport>,
     zone_map: HashMap<String, Zone>,
     zone_output_ids: Option<Vec<String>>,
     pause_on_track_end: bool,
+    browse_reached_home: bool,
     browse_paths: HashMap<String, Vec<&'static str>>,
     profiles: Option<Vec<(String, String)>>,
     queue_end: Option<QueueItem>,
@@ -96,7 +96,7 @@ pub async fn start(options: Options, to_app: Sender<IoEvent>, from_app: Receiver
                 let from_app = from_app.clone();
 
                 handlers.spawn(async move {
-                    let mut roon_handler = RoonHandler::new(to_app, config_path, TUI_BROWSE);
+                    let mut roon_handler = RoonHandler::new(to_app, config_path);
 
                     loop {
                         let mut from_app = from_app.lock().await;
@@ -125,23 +125,23 @@ pub async fn start(options: Options, to_app: Sender<IoEvent>, from_app: Receiver
 }
 
 impl RoonHandler {
-    fn new(to_app: Sender<IoEvent>, config_path: Arc<String>, primary_browse_key: &'static str) -> Self {
+    fn new(to_app: Sender<IoEvent>, config_path: Arc<String>) -> Self {
         let settings: Settings = serde_json::from_value(RoonApi::load_config(&config_path, "settings")).unwrap_or_default();
         let opts = BrowseOpts {
-            multi_session_key: Some(primary_browse_key.to_owned()),
+            multi_session_key: Some(TUI_BROWSE.to_owned()),
             ..Default::default()
         };
 
         Self {
             to_app,
             config_path,
-            primary_browse_key,
             settings,
             browse: None,
             transport: None,
             zone_map: HashMap::new(),
             zone_output_ids: None,
             pause_on_track_end: false,
+            browse_reached_home: false,
             browse_paths: HashMap::new(),
             profiles: None,
             queue_end: None,
@@ -261,6 +261,16 @@ impl RoonHandler {
                 for zone_id in zone_ids {
                     self.zone_map.remove(&zone_id);
                 }
+
+                let mut zones: Vec<(String, String)> = self.zone_map
+                    .iter()
+                    .map(|(zone_id, zone)| {
+                        (zone_id.to_owned(), zone.display_name.to_owned())
+                    })
+                    .collect();
+                zones.sort_by(|a, b| a.1.cmp(&b.1));
+
+                self.to_app.send(IoEvent::Zones(zones)).await.unwrap();
             }
             Parsed::ZonesSeek(seeks) => {
                 if let Some(zone_id) = self.settings.zone_id.as_deref() {
@@ -310,7 +320,7 @@ impl RoonHandler {
                         let multi_session_str = multi_session_key.as_deref()?;
                         let mut opts = LoadOpts::default();
 
-                        if multi_session_str == self.primary_browse_key {
+                        if multi_session_str == TUI_BROWSE {
                             let offset = list.display_offset.unwrap_or_default();
 
                             opts.offset = offset;
@@ -344,7 +354,7 @@ impl RoonHandler {
             Parsed::LoadResult(result, multi_session_key) => {
                 let multi_session_str = multi_session_key.as_deref()?;
 
-                if multi_session_str == self.primary_browse_key {
+                if multi_session_str == TUI_BROWSE {
                     let new_offset = result.offset + result.items.len();
 
                     if new_offset < result.list.count {
@@ -367,6 +377,7 @@ impl RoonHandler {
                         None
                     };
 
+                    self.browse_reached_home = result.list.level == 0;
                     self.to_app.send(IoEvent::BrowseList(result.offset, result.items)).await.unwrap();
                 } else {
                     let browse_path = self.browse_paths.get_mut(multi_session_str)?;
@@ -431,16 +442,27 @@ impl RoonHandler {
                 }
 
                 self.opts.item_key = item_key;
-                self.opts.zone_or_output_id = self.settings.zone_id.to_owned();
+
+                self.opts.zone_or_output_id = if let Some(zone_id) = self.settings.zone_id.as_deref() {
+                    if self.zone_map.contains_key(zone_id) {
+                        self.settings.zone_id.to_owned()
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
 
                 browse.browse(&self.opts).await;
 
                 self.opts.input = None;
             }
             IoEvent::BrowseBack => {
-                self.opts.pop_levels = Some(1);
+                if !self.browse_reached_home {
+                    self.opts.pop_levels = Some(1);
 
-                browse.browse(&self.opts).await;
+                    browse.browse(&self.opts).await;
+                }
             }
             IoEvent::BrowseRefresh => {
                 self.opts.refresh_list = true;

@@ -137,6 +137,22 @@ impl App {
                 }
                 IoEvent::Zones(zones) => {
                     self.zones.items = Some(zones);
+
+                    if self.selected_view == Some(View::Zones) {
+                        let index = if let Some(zone) = &self.selected_zone {
+                            if let Some(items) = self.zones.items.as_ref() {
+                                items
+                                    .iter()
+                                    .position(|(zone_id, _)| *zone_id == *zone.zone_id)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        self.zones.select(index);
+                    }
                 }
                 IoEvent::ZoneSelect => {
                     self.pending_item_key = self.get_item_key();
