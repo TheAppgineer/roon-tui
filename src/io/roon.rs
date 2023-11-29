@@ -16,7 +16,7 @@ use roon_api::{
     RoonApi,
     Services,
     Svc,
-    transport::{Control, Output, QueueItem, Seek, State, Transport, volume, Zone},
+    transport::{Control, Output, QueueItem, Repeat, Seek, State, Transport, volume, Zone},
 };
 
 use super::{IoEvent, QueueMode};
@@ -212,6 +212,11 @@ impl RoonHandler {
                     }
                 }
 
+                let new_zone = match self.settings.zone_id.as_deref() {
+                    Some(zone_id) => !self.zone_map.contains_key(zone_id),
+                    None => false,
+                };
+
                 for zone in zones {
                     self.zone_map.insert(zone.zone_id.to_owned(), zone);
                 }
@@ -226,14 +231,16 @@ impl RoonHandler {
 
                 self.to_app.send(IoEvent::Zones(zones)).await.unwrap();
 
-                self.sync_queue_mode().await;
+                self.sync_and_save_queue_mode().await;
 
                 if let Some(zone_id) = self.settings.zone_id.as_deref() {
-                    if let Some(browse_path) = self.browse_profile(zone_id).await {
-                        self.browse_paths.insert(zone_id.to_owned(), browse_path);
-                    }
-
                     if let Some(zone) = self.zone_map.get(zone_id).cloned() {
+                        if new_zone {
+                            if let Some(browse_path) = self.browse_profile().await {
+                                self.browse_paths.insert(zone_id.to_owned(), browse_path);
+                            }
+                        }
+
                         if zone.state != State::Playing {
                             if self.pause_on_track_end {
                                 self.pause_on_track_end = false;
@@ -243,9 +250,6 @@ impl RoonHandler {
                             let seek_seconds = self.seek_seconds.take();
                             self.seek_to_end(Some(zone_id), seek_seconds).await;
                         }
-
-                        let settings = self.settings.serialize(serde_json::value::Serializer).unwrap();
-                        RoonApi::save_config(&self.config_path, "settings", settings).unwrap();
 
                         self.to_app.send(IoEvent::ZoneChanged(zone)).await.unwrap();
                     }
@@ -435,7 +439,7 @@ impl RoonHandler {
                         let settings = self.settings.serialize(serde_json::value::Serializer).unwrap();
                         RoonApi::save_config(&self.config_path, "settings", settings).unwrap();
 
-                        if let Some(browse_path) = self.browse_profile(zone_id).await {
+                        if let Some(browse_path) = self.browse_profile().await {
                             self.browse_paths.insert(zone_id.to_owned(), browse_path);
                         }
                     }
@@ -517,7 +521,7 @@ impl RoonHandler {
                     transport.unsubscribe_queue().await;
                     transport.subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
 
-                    if let Some(browse_path) = self.browse_profile(&zone_id).await {
+                    if let Some(browse_path) = self.browse_profile().await {
                         self.browse_paths.insert(zone_id.to_owned(), browse_path);
                     }
 
@@ -525,13 +529,10 @@ impl RoonHandler {
                         self.to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
                     }
 
-                    // Store the zone_id in settings before it is used again in sync_queue_mode
+                    // Store the zone_id in settings before it is used again in sync_and_save_queue_mode
                     self.settings.zone_id = Some(zone_id);
 
-                    self.sync_queue_mode().await;
-
-                    let settings = self.settings.serialize(serde_json::value::Serializer).unwrap();
-                    RoonApi::save_config(&self.config_path, "settings", settings).unwrap();
+                    self.sync_and_save_queue_mode().await;
                 }
             }
             IoEvent::ZoneGroupReq => {
@@ -565,6 +566,12 @@ impl RoonHandler {
                         }
                     }
                 }
+            }
+            IoEvent::Repeat => {
+                self.toggle_repeat().await;
+            },
+            IoEvent::Shuffle => {
+                self.toggle_shuffle().await;
             }
             IoEvent::PauseOnTrackEndReq => {
                 self.pause_on_track_end = self.handle_pause_on_track_end_req().unwrap_or_default();
@@ -617,7 +624,8 @@ impl RoonHandler {
         })
     }
 
-    async fn browse_profile(&self, zone_id: &str) -> Option<Vec<&'static str>> {
+    async fn browse_profile(&self) -> Option<Vec<&'static str>> {
+        let zone_id = self.settings.zone_id.as_deref()?;
         let opts = BrowseOpts {
             multi_session_key: Some(zone_id.to_owned()),
             ..Default::default()
@@ -628,7 +636,7 @@ impl RoonHandler {
         Some(vec!["", "Profile", "Settings"])
     }
 
-    async fn sync_queue_mode(&mut self) -> Option<()> {
+    async fn sync_and_save_queue_mode(&mut self) -> Option<()> {
         let zone_id = self.settings.zone_id.as_deref()?;
         let zone = self.zone_map.get(zone_id)?;
         let output_id = zone.outputs.get(0)?.output_id.as_str();
@@ -653,6 +661,9 @@ impl RoonHandler {
 
         self.to_app.send(IoEvent::QueueModeCurrent(queue_mode.to_owned())).await.unwrap();
         self.settings.queue_modes.as_mut()?.insert(output_id.to_owned(), queue_mode);
+
+        let settings = self.settings.serialize(serde_json::value::Serializer).unwrap();
+        RoonApi::save_config(&self.config_path, "settings", settings).unwrap();
 
         Some(())
     }
@@ -805,6 +816,32 @@ impl RoonHandler {
         let mut settings = self.zone_map.get(zone_id)?.settings.clone();
 
         settings.auto_radio = auto_radio;
+        self.transport.as_ref()?.change_settings(zone_id, settings).await
+    }
+
+    async fn toggle_repeat(&self) -> Option<usize> {
+        let zone_id = self.settings.zone_id.as_deref()?;
+        let mut settings = self.zone_map.get(zone_id)?.settings.clone();
+        let index = settings.repeat.to_owned() as usize + 1;
+        let seq = vec![
+            Repeat::Off,
+            Repeat::All,
+            Repeat::One,
+        ];
+
+        settings.repeat = match seq.get(index) {
+            None => Repeat::Off,
+            Some(repeat) => repeat.to_owned(),
+        };
+
+        self.transport.as_ref()?.change_settings(zone_id, settings).await
+    }
+
+    async fn toggle_shuffle(&self) -> Option<usize> {
+        let zone_id = self.settings.zone_id.as_deref()?;
+        let mut settings = self.zone_map.get(zone_id)?.settings.clone();
+
+        settings.shuffle = !settings.shuffle;
         self.transport.as_ref()?.change_settings(zone_id, settings).await
     }
 

@@ -635,6 +635,8 @@ impl App {
             KeyCode::Char('u') => self.to_roon.send(IoEvent::Mute(volume::Mute::Unmute)).await.unwrap(),
             KeyCode::Char('+') => self.to_roon.send(IoEvent::ChangeVolume(1)).await.unwrap(),
             KeyCode::Char('-') => self.to_roon.send(IoEvent::ChangeVolume(-1)).await.unwrap(),
+            KeyCode::Char('r') => self.to_roon.send(IoEvent::Repeat).await.unwrap(),
+            KeyCode::Char('s') => self.to_roon.send(IoEvent::Shuffle).await.unwrap(),
             _ => (),
         }
     }

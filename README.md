@@ -165,6 +165,8 @@ In the Random Album and Random Track mode new entries can be added to the Queue 
 |u|Unmute
 |+|Volume up
 |-|Volume down
+|r|Toggle Repeat
+|s|Toggle Shuffle
 ### Search Popup
 |||
 |---|---|
