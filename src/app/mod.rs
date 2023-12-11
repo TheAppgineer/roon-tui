@@ -26,7 +26,8 @@ enum View {
     Prompt = 3,
     Zones = 4,
     Grouping = 5,
-    Help = 6,
+    GroupingPreset = 6,
+    Help = 7,
 }
 
 pub struct App {
@@ -50,6 +51,9 @@ pub struct App {
     queue: StatefulList<QueueItem>,
     pause_on_track_end: bool,
     queue_mode: Option<&'static str>,
+    matched_preset: Option<String>,
+    matched_draft_preset: Option<String>,
+    draft_match: bool,
 }
 
 impl App {
@@ -75,6 +79,9 @@ impl App {
             queue: StatefulList::new(),
             pause_on_track_end: false,
             queue_mode: None,
+            matched_preset: None,
+            matched_draft_preset: None,
+            draft_match: false,
         }
     }
 
@@ -177,11 +184,20 @@ impl App {
                                 _ => (),
                             }
 
+                            self.matched_draft_preset = self.matched_preset.to_owned();
                             self.select_view(Some(View::Grouping));
                         }
                     }
 
                     self.grouping.items = grouping;
+                }
+                IoEvent::ZonePresetMatched(matched_preset) => {
+                    if self.draft_match {
+                        self.draft_match = false;
+                        self.matched_draft_preset = matched_preset;
+                    } else {
+                        self.matched_preset = matched_preset;
+                    }
                 }
                 IoEvent::PauseOnTrackEndActive(pause_on_track_end) => self.pause_on_track_end = pause_on_track_end,
                 _ => ()
@@ -497,7 +513,9 @@ impl App {
                                     View::NowPlaying => self.handle_now_playing_key_codes(key).await,
                                     View::Queue => self.handle_queue_key_codes(key).await,
                                     View::Zones => self.handle_zone_key_codes(key).await,
-                                    View::Grouping => self.handle_grouping_key_codes(key).await,
+                                    View::Grouping => {
+                                        self.handle_grouping_key_codes(key).await;
+                                    }
                                     View::Help => self.restore_view(),
                                     _ => (),
                                 }
@@ -559,6 +577,7 @@ impl App {
                 match *view {
                     View::Browse => self.handle_browse_key_codes(key).await,
                     View::Prompt => self.handle_prompt_key_codes(key).await,
+                    View::GroupingPreset => self.handle_preset_key_codes(key).await,
                     _ => (),
                 }
             }
@@ -714,7 +733,7 @@ impl App {
             KeyCode::PageUp => self.zones.select_prev_page(),
             KeyCode::PageDown => self.zones.select_next_page(),
             KeyCode::Enter => {
-                let selected_zone_id = self.get_zone_id();
+                let selected_zone_id = self.get_zone_id().await;
                 self.restore_view();
 
                 if let Some(zone_id) = selected_zone_id.as_ref() {
@@ -726,7 +745,7 @@ impl App {
         }
     }
 
-    async fn handle_grouping_key_codes(&mut self, key: KeyEvent) {
+    async fn handle_grouping_key_codes(&mut self, key: KeyEvent) -> Option<()> {
         match key.code {
             KeyCode::Up => self.grouping.prev(),
             KeyCode::Down => self.grouping.next(),
@@ -735,30 +754,103 @@ impl App {
             KeyCode::PageUp => self.grouping.select_prev_page(),
             KeyCode::PageDown => self.grouping.select_next_page(),
             KeyCode::Char(' ') => {
-                if let Some(item) = self.grouping.get_selected_item_mut() {
-                    item.2 = !item.2;
+                let item = self.grouping.get_selected_item_mut()?;
+                item.2 = !item.2;
+
+                let items = self.grouping.items.as_ref()?;
+                let output_ids = self.get_included_output_ids(items);
+
+                if output_ids.len() > 1 {
+                    self.draft_match = true;
+                    self.to_roon.send(IoEvent::ZoneMatchPreset(output_ids)).await.unwrap();
                 }
             }
             KeyCode::Enter => {
                 self.restore_view();
 
-                if let Some(items) = self.grouping.items.as_ref() {
-                    let output_ids:Vec<String> = items.iter()
-                        .filter_map(|(output_id, _, included)| {
-                            if *included {
-                                Some(output_id.to_owned())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
+                let items = self.grouping.items.as_ref()?;
+                let output_ids = self.get_included_output_ids(items);
 
-                    self.to_roon.send(IoEvent::ZoneGrouped(output_ids)).await.unwrap();
+                if !output_ids.is_empty() {
+                    if !self.input.is_empty() {
+                        if output_ids.len() > 1 {
+                            self.to_roon.send(IoEvent::ZoneSavePreset(self.input.to_owned(), output_ids)).await.unwrap();
+                        } else {
+                            self.to_roon.send(IoEvent::ZoneGrouped(output_ids)).await.unwrap();
+                        }
+
+                        self.input.clear();
+                        self.reset_cursor();
+                    } else {
+                        self.to_roon.send(IoEvent::ZoneGrouped(output_ids)).await.unwrap();
+                    }
                 }
             }
-            KeyCode::Esc => self.restore_view(),
+            KeyCode::Char('s') => {
+                self.save_preset();
+            }
+            KeyCode::Esc => {
+                self.restore_view();
+            }
             _ => (),
         }
+
+        Some(())
+    }
+
+    async fn handle_preset_key_codes(&mut self, key: KeyEvent) {
+        match key.modifiers {
+            KeyModifiers::SHIFT => {
+                match key.code {
+                    KeyCode::Char(to_insert) => self.enter_char(to_insert),
+                    _ => (),
+                }
+            }
+            KeyModifiers::NONE => {
+                match key.code {
+                    KeyCode::Enter => {
+                        // Restore the grouping view, keeping the provided input string
+                        self.selected_view = Some(View::Grouping);
+                        self.grouping.select(Some(0));
+                    }
+                    KeyCode::Char(to_insert) => self.enter_char(to_insert),
+                    KeyCode::Backspace => self.delete_char(),
+                    KeyCode::Delete => {
+                        self.move_cursor_right();
+                        self.delete_char();
+                    }
+                    KeyCode::Left => self.move_cursor_left(),
+                    KeyCode::Right => self.move_cursor_right(),
+                    KeyCode::Home => self.move_cursor_home(),
+                    KeyCode::End => self.move_cursor_end(),
+                    KeyCode::Esc => {
+                        self.selected_view = Some(View::Grouping);
+                        self.input.clear();
+                        self.reset_cursor();
+                        self.grouping.select(Some(0));
+                    }
+                    _ => (),
+                }
+            }
+            _ => (),
+        }
+    }
+
+    fn save_preset(&mut self) -> Option<()> {
+        let items = self.grouping.items.as_ref()?;
+        let output_ids = self.get_included_output_ids(items);
+
+        if output_ids.len() > 1 {
+            if let Some(preset)  = self.matched_draft_preset.as_deref() {
+                self.input = preset.to_owned();
+                self.cursor_position = self.input.len();
+            }
+
+            self.selected_view = Some(View::GroupingPreset);
+            self.grouping.deselect();
+        }
+
+        Some(())
     }
 
     fn get_item_key(&self) -> Option<String> {
@@ -769,7 +861,27 @@ impl App {
         Some(self.queue.get_selected_item()?.queue_item_id)
     }
 
-    fn get_zone_id(&self) -> Option<String> {
-        self.zones.get_selected_item().map(|(zone_id, _)| zone_id).cloned()
+    async fn get_zone_id(&self) -> Option<String> {
+        let (zone_id, preset) = self.zones.get_selected_item()?;
+
+        if zone_id == "preset" {
+            self.to_roon.send(IoEvent::ZoneLoadPreset(preset.to_owned())).await.unwrap();
+
+            None
+        } else {
+            Some(zone_id.to_owned())
+        }
+    }
+
+    fn get_included_output_ids(&self, items: &Vec<(String, String, bool)>) -> Vec<String> {
+        items.iter()
+            .filter_map(|(output_id, _, included)| {
+                if *included {
+                    Some(output_id.to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
