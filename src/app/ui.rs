@@ -576,11 +576,22 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
     app.zones.prepare_paging(page_lines, |_| 1);
 
     if let Some(zones) = app.zones.items.as_ref() {
+        let output_ids = if let Some(zone) = app.selected_zone.as_ref() {
+            zone.outputs.iter()
+                .map(|output| {
+                    output.output_id.as_str()
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let items: Vec<ListItem> = zones
             .iter()
             .map(|(zone_id, name)| {
                 let name = if zone_id == "preset" {
                     format!("[{}]", name)
+                } else if output_ids.contains(&zone_id.as_str()) {
+                    format!("<{}>", name)
                 } else {
                     name.to_owned()
                 };
