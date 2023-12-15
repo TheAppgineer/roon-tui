@@ -17,6 +17,10 @@ Roon TUI uses an own developed [Rust port](https://github.com/TheAppgineer/rust-
 * Change directory and build the project: `cd roon-tui && cargo build --release`
 * The binary can be found in: `target/release/roon-tui`
 
+#### Updating
+* Get the latest: `git pull`
+* Rebuild: `cargo build --release`
+
 ### Downloading Release Binaries
 Prebuilt binaries can be downloaded from the [latests release](https://github.com/TheAppgineer/roon-tui/releases/latest) page on GitHub. Binaries might have been created by other users for platforms I don't have access to myself.
 
@@ -81,9 +85,13 @@ Roon TUI uses some unicode symbols to improve on looks. If these symbols are not
 ![Roon TUI unicode symbols](images/unicode-symbols.png)
 
 ### Zone Selection and Grouping
-The Roon zone that is controlled by Roon TUI is shown in the lower right corner and can be changed by using `Ctrl-z`.
+The Roon zone that is controlled by Roon TUI is shown in the lower right corner and can be selected via the Zone List (requested using `Ctrl-z`).
 
-The grouping of zones can be viewed and changed by using `Ctr-g`. Ouputs are added or removed from the group by using `Space`, the grouping is activated by using `Enter`.
+The grouping of zones can be viewed and changed by using `Ctr-g`. Ouputs are added or removed from the group by using `Space`, the grouping is activated by using `Enter`. A set grouping can be saved as a preset using `s`, and be restored at a later time. Presets appear in the Zone List and are surrounded by square brackets: `[group-preset]`.
+
+The Zone list also lists the ouputs that make up a currently active grouping, these outputs are surrounded by angle brackets `<output>`.
+
+Presets and outputs can be selected to group and ungroup zones.
 
 ### Multi-character Jump in Browse View
 After a list of Artists, Albums, etc. is selected, and it is known what to play, a name can be directly typed in the Browse View. The first item that matches the input will be selected. The currently matched characters are displayed in the lower left corner of the view. The Backspace key can be used to revert to previous selections, the Home keys clears the complete input.
@@ -167,20 +175,20 @@ In the Random Album and Random Track mode new entries can be added to the Queue 
 |-|Volume down
 |r|Toggle Repeat
 |s|Toggle Shuffle
-### Search Popup
-|||
-|---|---|
-|Enter|Search provided term
-|Esc|Back to Browse view
 ### Zone Select Popup
 |||
 |---|---|
 |Enter|Select Zone
 |Esc|Back to previous view
-
 ### Zone Grouping Popup
 |||
 |---|---|
 |Space|Add or remove output from group
 |Enter|Activate Grouping
+|s|Save as preset
 |Esc|Back to previous view
+### Text Input
+|||
+|---|---|
+|Enter|Confirm input
+|Esc|Cancel input

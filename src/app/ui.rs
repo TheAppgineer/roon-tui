@@ -796,10 +796,6 @@ fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
         "r       Toggle Repeat",
         "s       Toggle shuffle",
         "",
-        "__Search Popup__",
-        "Enter   Search input",
-        "Esc     Back to Browse",
-        "",
         "__Zone Select Popup__",
         "Enter   Select zone",
         "Esc     Back to view",
@@ -807,7 +803,12 @@ fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
         "__Zone Grouping Popup__",
         "Space   Toggle output",
         "Enter   Activate group",
+        "s       Save as preset",
         "Esc     Back to view",
+        "",
+        "__Text input__",
+        "Enter   Confirm input",
+        "Esc     Cancel input",
     ];
 
     frame.render_widget(Clear, chunk[0]);   // This clears out the background
