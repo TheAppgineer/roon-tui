@@ -7,7 +7,7 @@ use ratatui::{
 };
 use roon_api::transport::{State, Zone, Repeat, volume::Scale};
 
-use crate::app::{App, View};
+use crate::{app::{App, View}, io::EndPoint};
 
 const ROON_BRAND_COLOR: Color = Color::Rgb(0x75, 0x75, 0xf3);
 const CUSTOM_GRAY: Color = Color::Rgb(0x80, 0x80, 0x80);
@@ -576,24 +576,13 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
     app.zones.prepare_paging(page_lines, |_| 1);
 
     if let Some(zones) = app.zones.items.as_ref() {
-        let output_ids = if let Some(zone) = app.selected_zone.as_ref() {
-            zone.outputs.iter()
-                .map(|output| {
-                    output.output_id.as_str()
-                })
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
         let items: Vec<ListItem> = zones
             .iter()
-            .map(|(zone_id, name)| {
-                let name = if zone_id == "preset" {
-                    format!("[{}]", name)
-                } else if output_ids.contains(&zone_id.as_str()) {
-                    format!("<{}>", name)
-                } else {
-                    name.to_owned()
+            .map(|(end_point, name)| {
+                let name = match end_point {
+                    EndPoint::Preset(_) => format!("[{}]", name),
+                    EndPoint::Output(_) => format!("<{}>", name),
+                    EndPoint::Zone(_) => name.to_owned(),
                 };
                 let line = Span::styled(
                     name,
@@ -806,7 +795,7 @@ fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
         "s       Save as preset",
         "Esc     Back to view",
         "",
-        "__Text input__",
+        "__Text Input__",
         "Enter   Confirm input",
         "Esc     Cancel input",
     ];

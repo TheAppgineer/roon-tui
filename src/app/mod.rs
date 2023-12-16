@@ -6,7 +6,7 @@ use roon_api::{
 };
 use tokio::sync::mpsc;
 
-use crate::io::{IoEvent, QueueMode};
+use crate::io::{EndPoint, IoEvent, QueueMode};
 use crate::app::stateful_list::StatefulList;
 
 pub mod ui;
@@ -44,7 +44,7 @@ pub struct App {
     input: String,
     cursor_position: usize,
     max_input_len: usize,
-    zones: StatefulList<(String, String)>,
+    zones: StatefulList<(EndPoint, String)>,
     selected_zone: Option<Zone>,
     zone_seek: Option<ZoneSeek>,
     grouping: StatefulList<(String, String, bool)>,
@@ -150,7 +150,12 @@ impl App {
                             if let Some(items) = self.zones.items.as_ref() {
                                 items
                                     .iter()
-                                    .position(|(zone_id, _)| *zone_id == *zone.zone_id)
+                                    .position(|(end_point, _)| {
+                                        match end_point {
+                                            EndPoint::Zone(zone_id) => *zone_id == zone.zone_id,
+                                            _ => false,
+                                        }
+                                    })
                             } else {
                                 None
                             }
@@ -266,7 +271,12 @@ impl App {
                             if let Some(items) = self.zones.items.as_ref() {
                                 items
                                     .iter()
-                                    .position(|(zone_id, _)| *zone_id == *zone.zone_id)
+                                    .position(|(end_point, _)| {
+                                        match end_point {
+                                            EndPoint::Zone(zone_id) => *zone_id == zone.zone_id,
+                                            _ => false,
+                                        }
+                                    })
                             } else {
                                 None
                             }
@@ -733,12 +743,11 @@ impl App {
             KeyCode::PageUp => self.zones.select_prev_page(),
             KeyCode::PageDown => self.zones.select_next_page(),
             KeyCode::Enter => {
-                let selected_zone_id = self.get_zone_id().await;
-                self.restore_view();
-
-                if let Some(zone_id) = selected_zone_id.as_ref() {
-                    self.to_roon.send(IoEvent::ZoneSelected(zone_id.to_owned())).await.unwrap();
+                if let Some((end_point, _)) = self.zones.get_selected_item() {
+                    self.to_roon.send(IoEvent::ZoneSelected(end_point.to_owned())).await.unwrap();
                 }
+
+                self.restore_view();
             }
             KeyCode::Esc => self.restore_view(),
             _ => (),
@@ -859,18 +868,6 @@ impl App {
 
     fn get_queue_item_id(&self) -> Option<u32> {
         Some(self.queue.get_selected_item()?.queue_item_id)
-    }
-
-    async fn get_zone_id(&self) -> Option<String> {
-        let (zone_id, preset) = self.zones.get_selected_item()?;
-
-        if zone_id == "preset" {
-            self.to_roon.send(IoEvent::ZoneLoadPreset(preset.to_owned())).await.unwrap();
-
-            None
-        } else {
-            Some(zone_id.to_owned())
-        }
     }
 
     fn get_included_output_ids(&self, items: &Vec<(String, String, bool)>) -> Vec<String> {

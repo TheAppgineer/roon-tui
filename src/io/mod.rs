@@ -14,6 +14,13 @@ pub enum QueueMode {
     RandomTrack = 3,
 }
 
+#[derive(Clone, Debug)]
+pub enum EndPoint {
+    Zone(String),
+    Output(String),
+    Preset(String),
+}
+
 #[derive(Debug)]
 pub enum IoEvent {
     Input(KeyEvent),
@@ -34,9 +41,9 @@ pub enum IoEvent {
     QueueModeNext,
     QueueModeAppend,
     QueueModeCurrent(QueueMode),
-    Zones(Vec<(String, String)>),
+    Zones(Vec<(EndPoint, String)>),
     ZoneSelect,
-    ZoneSelected(String),
+    ZoneSelected(EndPoint),
     ZoneChanged(Zone),
     ZoneRemoved(String),
     ZoneSeek(ZoneSeek),
@@ -44,7 +51,6 @@ pub enum IoEvent {
     ZoneGrouping(Option<Vec<(String, String, bool)>>),
     ZoneGrouped(Vec<String>),
     ZoneSavePreset(String, Vec<String>),
-    ZoneLoadPreset(String),
     ZoneMatchPreset(Vec<String>),
     ZonePresetMatched(Option<String>),
     Mute(volume::Mute),
