@@ -611,6 +611,14 @@ impl RoonHandler {
 
                 self.zone_output_ids = self.update_grouping(output_ids).await;
             }
+            IoEvent::ZoneDeletePreset(preset) => {
+                self.settings.presets.as_mut()?.remove(&preset);
+
+                let settings = self.settings.serialize(serde_json::value::Serializer).unwrap();
+                RoonApi::save_config(&self.config_path, "settings", settings).unwrap();
+
+                self.send_zone_list().await;
+            }
             IoEvent::ZoneMatchPreset(mut output_ids) => {
                 let preset = self.match_preset(&mut output_ids);
 

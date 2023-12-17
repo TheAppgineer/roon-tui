@@ -749,6 +749,13 @@ impl App {
 
                 self.restore_view();
             }
+            KeyCode::Delete => {
+                if let Some((end_point, _)) = self.zones.get_selected_item() {
+                    if let EndPoint::Preset(preset) = end_point {
+                        self.to_roon.send(IoEvent::ZoneDeletePreset(preset.to_owned())).await.unwrap();
+                    }
+                }
+            }
             KeyCode::Esc => self.restore_view(),
             _ => (),
         }

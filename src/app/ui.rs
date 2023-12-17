@@ -788,6 +788,7 @@ fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
         "__Zone Select Popup__",
         "Enter   Select zone",
         "Esc     Back to view",
+        "Delete  Delete preset",
         "",
         "__Zone Grouping Popup__",
         "Space   Toggle output",

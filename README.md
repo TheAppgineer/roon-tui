@@ -180,6 +180,7 @@ In the Random Album and Random Track mode new entries can be added to the Queue 
 |---|---|
 |Enter|Select Zone
 |Esc|Back to previous view
+|Delete|Delete inactive preset
 ### Zone Grouping Popup
 |||
 |---|---|
