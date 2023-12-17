@@ -1037,7 +1037,7 @@ impl RoonHandler {
         self.transport.as_ref()?.change_settings(zone_id, settings).await
     }
 
-    async fn update_grouping(&mut self, new_ids: Vec<String>) -> Option<Vec<String>> {
+    async fn update_grouping(&mut self, mut new_ids: Vec<String>) -> Option<Vec<String>> {
         let output_ids = new_ids.iter()
             .map(|output_id| output_id.as_str())
             .collect::<Vec<_>>();
@@ -1054,18 +1054,28 @@ impl RoonHandler {
                 .any(|current_id| output_ids.contains(current_id));
 
             if matches_all {
+                let preset = self.match_preset(&mut new_ids);
+
+                if let Some(name) = preset.as_deref() {
+                    self.matched_zones.insert(zone.zone_id.to_owned(), name.to_owned());
+                    self.send_zone_list().await;
+                    self.to_app.send(IoEvent::ZonePresetMatched(preset)).await.unwrap();
+                }
+
                 return None;
             } else  if current_ids.len() > 1 && overlaps {
                 self.transport.as_ref()?.ungroup_outputs(current_ids).await;
 
                 return Some(new_ids);
-            } else if output_ids.len() > 1 {
-                self.transport.as_ref()?.group_outputs(output_ids).await;
-
-                return Some(new_ids);
             }
         }
 
-        None
+        if output_ids.len() > 1 {
+            self.transport.as_ref()?.group_outputs(output_ids).await;
+
+            Some(new_ids)
+        } else {
+            None
+        }
     }
 }

@@ -91,7 +91,11 @@ The grouping of zones can be viewed and changed by using `Ctr-g`. Ouputs are add
 
 The Zone list also lists the ouputs that make up a currently active grouping, these outputs are surrounded by angle brackets `<output>`.
 
-Presets and outputs can be selected to group and ungroup zones.
+A preset or output can be selected to either group or ungroup a zone.
+
+![Zone selection](images/zone-selection.png)
+
+An inactive preset can be deleted by selection it and using `Delete`.
 
 ### Multi-character Jump in Browse View
 After a list of Artists, Albums, etc. is selected, and it is known what to play, a name can be directly typed in the Browse View. The first item that matches the input will be selected. The currently matched characters are displayed in the lower left corner of the view. The Backspace key can be used to revert to previous selections, the Home keys clears the complete input.
