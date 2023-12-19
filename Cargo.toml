@@ -13,7 +13,7 @@ log = "0.4"
 simplelog = "0.12"
 time = "0.3"
 chrono = { version = "0.4", features = ["clock"], default-features = false }
-ratatui = { version = "0.24.0", features = ["crossterm"], default-features = false }
+ratatui = { version = "0.25.0", features = ["crossterm"], default-features = false }
 crossterm = "0.27.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
