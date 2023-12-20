@@ -89,6 +89,8 @@ The Roon zone that is controlled by Roon TUI is shown in the lower right corner 
 
 The grouping of zones can be viewed and changed by using `Ctr-g`. Ouputs are added or removed from the group by using `Space`, the grouping is activated by using `Enter`. A set grouping can be saved as a preset using `s`, and be restored at a later time. Presets appear in the Zone List and are surrounded by square brackets: `[group-preset]`.
 
+![Save preset](images/save-preset.png)
+
 The Zone list also lists the ouputs that make up a currently active grouping, these outputs are surrounded by angle brackets `<output>`.
 
 A preset or output can be selected to either group or ungroup a zone.

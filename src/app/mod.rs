@@ -167,7 +167,21 @@ impl App {
                     }
                 }
                 IoEvent::ZoneSelect => {
-                    self.pending_item_key = self.get_item_key();
+                    if let Some(items) = self.zones.items.as_ref() {
+                        let has_zones = items.iter()
+                            .any(|(endpoint, _)| {
+                                match endpoint {
+                                    EndPoint::Zone(_) => true,
+                                    _ => false,
+                                }
+                            });
+
+                        if has_zones {
+                            // Save item_key as there are active zones
+                            self.pending_item_key = self.get_item_key();
+                        }
+                    }
+
                     self.select_view(Some(View::Zones));
                 }
                 IoEvent::ZoneChanged(zone) => {
@@ -555,25 +569,33 @@ impl App {
                         KeyCode::Char('q') => self.to_roon.send(IoEvent::QueueModeNext).await.unwrap(),
                         KeyCode::Char('a') => self.to_roon.send(IoEvent::QueueModeAppend).await.unwrap(),
                         KeyCode::Char('z') => {
-                            match selected_view.as_ref() {
-                                Some(View::Prompt) => self.restore_view(),
-                                Some(View::Grouping) => self.restore_view(),
-                                Some(View::Help) => self.restore_view(),
-                                _ => (),
-                            }
+                            if selected_view != Some(View::Zones) {
+                                match selected_view {
+                                    Some(View::Prompt) => self.restore_view(),
+                                    Some(View::Grouping) => self.restore_view(),
+                                    Some(View::Help) => self.restore_view(),
+                                    _ => (),
+                                }
 
-                            self.select_view(Some(View::Zones));
+                                self.select_view(Some(View::Zones));
+                            }
                         }
-                        KeyCode::Char('g') => self.to_roon.send(IoEvent::ZoneGroupReq).await.unwrap(),
-                        KeyCode::Char('h') => {
-                            match selected_view.as_ref() {
-                                Some(View::Prompt) => self.restore_view(),
-                                Some(View::Zones) => self.restore_view(),
-                                Some(View::Grouping) => self.restore_view(),
-                                _ => (),
+                        KeyCode::Char('g') => {
+                            if selected_view != Some(View::Grouping) {
+                                self.to_roon.send(IoEvent::ZoneGroupReq).await.unwrap();
                             }
+                        }
+                        KeyCode::Char('h') => {
+                            if selected_view != Some(View::Help) {
+                                match selected_view {
+                                    Some(View::Prompt) => self.restore_view(),
+                                    Some(View::Zones) => self.restore_view(),
+                                    Some(View::Grouping) => self.restore_view(),
+                                    _ => (),
+                                }
 
-                            self.select_view(Some(View::Help));
+                                self.select_view(Some(View::Help));
+                            }
                         }
                         KeyCode::Char('c') => return AppReturn::Exit,
                         _ => (),

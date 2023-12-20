@@ -318,12 +318,11 @@ impl RoonHandler {
                 self.to_app.send(IoEvent::QueueListChanges(queue_changes)).await.unwrap();
             }
             Parsed::Outputs(outputs) => {
-                if let Some(zone_id) = self.settings.zone_id.as_deref() {
-                    let zone = self.zone_map.get(zone_id);
-                    let grouping = Self::get_grouping(zone, &outputs);
+                let zone_id = self.settings.zone_id.as_deref()?;
+                let zone = self.zone_map.get(zone_id);
+                let grouping = Self::get_grouping(zone, &outputs);
 
-                    self.to_app.send(IoEvent::ZoneGrouping(grouping)).await.unwrap();
-                }
+                self.to_app.send(IoEvent::ZoneGrouping(grouping)).await.unwrap();
             }
             Parsed::BrowseResult(result, multi_session_key) => {
                 match result.action {
@@ -357,6 +356,11 @@ impl RoonHandler {
                         let message = result.message.unwrap();
 
                         if is_error && message == "Zone is not configured" {
+                            if self.zone_map.is_empty() {
+                                // Drop the saved item_key as there are no active zones
+                                self.opts.item_key = None;
+                            }
+
                             self.to_app.send(IoEvent::ZoneSelect).await.unwrap();
                         }
                     }
@@ -493,27 +497,25 @@ impl RoonHandler {
             }
             IoEvent::QueueListLast(item) => self.queue_end = item,
             IoEvent::QueueSelected(queue_item_id) => {
-                if let Some(transport) = self.transport.as_ref() {
-                    if let Some(zone_id) = self.settings.zone_id.as_ref() {
-                        transport.play_from_here(zone_id, queue_item_id).await;
-                    }
-                }
+                let transport = self.transport.as_ref()?;
+                let zone_id = self.settings.zone_id.as_deref()?;
+
+                transport.play_from_here(zone_id, queue_item_id).await;
             }
             IoEvent::QueueClear => {
                 self.seek_seconds = self.play_queue_end().await;
             }
             IoEvent::QueueModeNext => {
-                if let Some(queue_mode) = self.select_next_queue_mode().await {
-                    let auto_radio = match queue_mode {
-                        QueueMode::RoonRadio => true,
-                        _ => false,
-                    };
+                let queue_mode = self.select_next_queue_mode().await?;
+                let auto_radio = match queue_mode {
+                    QueueMode::RoonRadio => true,
+                    _ => false,
+                };
 
-                    self.set_roon_radio(auto_radio).await.unwrap();
+                self.set_roon_radio(auto_radio).await.unwrap();
 
-                    let settings = self.settings.serialize(serde_json::value::Serializer).unwrap();
-                    RoonApi::save_config(&self.config_path, "settings", settings).unwrap();
-                }
+                let settings = self.settings.serialize(serde_json::value::Serializer).unwrap();
+                RoonApi::save_config(&self.config_path, "settings", settings).unwrap();
             }
             IoEvent::QueueModeAppend => {
                 let zone_id = self.settings.zone_id.as_deref()?;
@@ -631,26 +633,24 @@ impl RoonHandler {
                 self.change_volume(steps).await;
             }
             IoEvent::Control(how) => {
-                if let Some(zone_id) = self.settings.zone_id.as_deref() {
-                    let zone_option = self.zone_map.get(zone_id);
+                let zone_id = self.settings.zone_id.as_deref()?;
+                let zone_option = self.zone_map.get(zone_id);
+                let zone = zone_option?;
 
-                    if let Some(zone) = zone_option {
-                        if zone.now_playing.is_some() {
-                            self.control(zone_id, &how).await;
-                        } else if how == Control::PlayPause {
-                            if let Some(browse_path) = self.handle_queue_mode(
-                                zone_option,
-                                true,
-                            ).await {
-                                self.browse_paths.insert(zone_id.to_owned(), browse_path);
-                            }
-                        }
+                if zone.now_playing.is_some() {
+                    self.control(zone_id, &how).await;
+                } else if how == Control::PlayPause {
+                    if let Some(browse_path) = self.handle_queue_mode(
+                        zone_option,
+                        true,
+                    ).await {
+                        self.browse_paths.insert(zone_id.to_owned(), browse_path);
                     }
                 }
             }
             IoEvent::Repeat => {
                 self.toggle_repeat().await;
-            },
+            }
             IoEvent::Shuffle => {
                 self.toggle_shuffle().await;
             }
