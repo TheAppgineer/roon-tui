@@ -7,7 +7,7 @@ use ratatui::{
 };
 use roon_api::transport::{State, Zone, Repeat, volume::Scale};
 
-use crate::app::{App, View};
+use crate::{app::{App, View}, io::EndPoint};
 
 const ROON_BRAND_COLOR: Color = Color::Rgb(0x75, 0x75, 0xf3);
 const CUSTOM_GRAY: Color = Color::Rgb(0x80, 0x80, 0x80);
@@ -65,7 +65,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     match app.selected_view {
         Some(View::Prompt) => draw_prompt_view(frame, top_chunks[0], app),
         Some(View::Zones) => draw_zones_view(frame, top_chunks[1], app),
-        Some(View::Grouping) => draw_grouping_view(frame, top_chunks[1], app),
+        Some(View::Grouping) | Some(View::GroupingPreset) => {
+            draw_grouping_view(frame, top_chunks[1], app);
+        }
         Some(View::Help) => draw_help_view(frame, size, app),
         _ => (),
     }
@@ -281,9 +283,14 @@ fn draw_now_playing_view(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(CUSTOM_GRAY)
         };
 
+        let display_name = match app.matched_preset.as_ref() {
+            Some(preset) => format!("{} ({})", preset.as_str(), zone.display_name),
+            None => zone.display_name.to_owned(),
+        };
+
         block = block.title(
             Title::from(Span::styled(
-                zone.display_name.as_str(),
+                display_name,
                 get_text_view_style(app, view),
             )).alignment(Alignment::Right)
         );
@@ -543,7 +550,7 @@ fn draw_prompt_view(frame: &mut Frame, area: Rect, app: &mut App) {
     // rendering
     frame.set_cursor(
         // Draw the cursor at the current position in the input field.
-        // This position is can be controlled via the left and right arrow key
+        // This position can be controlled via the left and right arrow key
         area.x + app.cursor_position.clamp(0, max_len) as u16 + 1,
         // Move one line down, from the border to the input line
         area.y + 1,
@@ -571,7 +578,12 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
     if let Some(zones) = app.zones.items.as_ref() {
         let items: Vec<ListItem> = zones
             .iter()
-            .map(|(_, name)| {
+            .map(|(end_point, name)| {
+                let name = match end_point {
+                    EndPoint::Preset(_) => format!("[{}]", name),
+                    EndPoint::Output(_) => format!("<{}>", name),
+                    EndPoint::Zone(_) => name.to_owned(),
+                };
                 let line = Span::styled(
                     name,
                     get_text_view_style(&app, view));
@@ -597,52 +609,110 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_widget(block, area);
 }
 
-fn draw_grouping_view(frame: &mut Frame, area: Rect, app: &mut App) {
-    let view = Some(&View::Grouping);
+fn draw_grouping_view(frame: &mut Frame, area: Rect, app: &mut App) -> Option<()> {
+    let view = if app.selected_view == Some(View::GroupingPreset) {
+        View::GroupingPreset
+    } else {
+        View::Grouping
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, view))
-        .title(Span::styled(
-            "Zone Grouping",
-            get_text_view_style(&app, view),
-        ))
-        .title_alignment(Alignment::Left);
-
+        .border_style(get_border_view_style(app, Some(&view)));
     let area = bottom_right_rect(50, 50, area);
-    let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
+    let vchunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Min(2),
+                Constraint::Min(5),
+            ]
+            .as_ref(),
+        )
+        .horizontal_margin(1)
+        .split(area);
+
+    let list_area = Rect::new(
+        vchunks[1].x,
+        vchunks[1].y,
+        vchunks[1].width,
+        vchunks[1].height.saturating_sub(1)
+    );
 
     frame.render_widget(Clear, area);   // This clears out the background
 
-    app.grouping.prepare_paging(page_lines, |_| 1);
+    if view == View::GroupingPreset {
+        let max_len = vchunks[0].width.saturating_sub(1) as usize;
+        app.set_max_input_len(max_len);
 
-    if let Some(grouping) = app.grouping.items.as_ref() {
-        let checked_symbol = if app.no_unicode_symbols {CHECKED_SYMBOL} else {UNI_CHECKED_SYMBOL};
-        let unchecked_symbol = if app.no_unicode_symbols {UNCHECKED_SYMBOL} else {UNI_UNCHECKED_SYMBOL};
-        let items: Vec<ListItem> = grouping
-            .iter()
-            .map(|(_, name, included)| {
-                let state = if *included {checked_symbol} else {unchecked_symbol};
-                let line = Span::styled(
-                    format!("{}  {}", state, name),
-                    get_text_view_style(&app, view));
-                ListItem::new(Line::from(line)).style(Style::default())
-            })
-            .collect();
+        let input = vec![
+            Line::from(""),                 // Hidden underneath border
+            Line::from(Span::styled(app.input.as_str(), Style::default().fg(Color::Reset).add_modifier(Modifier::BOLD)))
+        ];
+        let input = Paragraph::new(input)
+            .style(Style::default().fg(ROON_BRAND_COLOR));
 
-        // Create a List from all list items and highlight the currently selected one
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL))
-            .highlight_style(
-                Style::default()
-                    .bg(ROON_BRAND_COLOR)
-                    .add_modifier(Modifier::BOLD)
-            );
+        frame.render_widget(input, vchunks[0]);
 
-        // We can now render the item list
-        frame.render_stateful_widget(list, area, &mut app.grouping.state);
+        // Make the cursor visible and ask ratatui to put it at the specified coordinates after
+        // rendering
+        frame.set_cursor(
+            // Draw the cursor at the current position in the input field.
+            // This position can be controlled via the left and right arrow key
+            vchunks[0].x + app.cursor_position.clamp(0, max_len) as u16,
+            // Move one line down, from the border to the input line
+            vchunks[0].y + 1,
+        );
+    } else {
+        let ouput_ids = app.get_included_output_ids(app.grouping.items.as_ref()?);
+        let zone_name = if ouput_ids.len() <= 1 {
+            app.selected_zone.as_ref()?.display_name.as_str()
+        } else if !app.input.is_empty() {
+            app.input.as_str()
+        } else if app.matched_draft_preset.is_some() {
+            app.matched_draft_preset.as_deref()?
+        } else {
+            app.selected_zone.as_ref()?.display_name.as_str()
+        };
+        let zone_name = vec![
+            Line::from(""),                 // Hidden underneath border
+            Line::from(Span::styled(zone_name, Style::default().fg(Color::Reset).add_modifier(Modifier::BOLD))),
+        ];
+        let page_lines = list_area.height as usize;
+
+        app.grouping.prepare_paging(page_lines, |_| 1);
+
+        frame.render_widget(Paragraph::new(zone_name), vchunks[0]);
     }
 
+    let grouping = app.grouping.items.as_ref()?;
+    let checked_symbol = if app.no_unicode_symbols {CHECKED_SYMBOL} else {UNI_CHECKED_SYMBOL};
+    let unchecked_symbol = if app.no_unicode_symbols {UNCHECKED_SYMBOL} else {UNI_UNCHECKED_SYMBOL};
+    let items: Vec<ListItem> = grouping
+        .iter()
+        .map(|(_, name, included)| {
+            let state = if *included {checked_symbol} else {unchecked_symbol};
+            let line = Span::styled(
+                format!("{}  {}", state, name),
+                get_text_view_style(&app, Some(&View::Grouping)));
+
+            ListItem::new(Line::from(line)).style(Style::default())
+        })
+        .collect();
+
+    // Create a List from all list items and highlight the currently selected one
+    let list = List::new(items)
+        .block(Block::default())
+        .highlight_style(
+            Style::default()
+                .bg(ROON_BRAND_COLOR)
+                .add_modifier(Modifier::BOLD)
+        );
+
+    // We can now render the widgets
+    frame.render_stateful_widget(list, list_area, &mut app.grouping.state);
     frame.render_widget(block, area);
+
+    Some(())
 }
 
 fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -686,7 +756,7 @@ fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
         "Ctrl-q  Queue mode",
         "Ctrl-a  Append queue",
         "Ctrl-h  This help page",
-        "Ctrl-q  Quit",
+        "Ctrl-c  Quit",
         "",
         "__List Controls__",
         "Up      Move up",
@@ -712,19 +782,23 @@ fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
         "u       Unmute",
         "+       Volume up",
         "-       Volume down",
-        "",
-        "__Search Popup__",
-        "Enter   Search input",
-        "Esc     Back to Browse",
+        "r       Toggle Repeat",
+        "s       Toggle shuffle",
         "",
         "__Zone Select Popup__",
         "Enter   Select zone",
         "Esc     Back to view",
+        "Delete  Delete preset",
         "",
-        "__Zone Grouping popup__",
+        "__Zone Grouping Popup__",
         "Space   Toggle output",
         "Enter   Activate group",
+        "s       Save as preset",
         "Esc     Back to view",
+        "",
+        "__Text Input__",
+        "Enter   Confirm input",
+        "Esc     Cancel input",
     ];
 
     frame.render_widget(Clear, chunk[0]);   // This clears out the background
