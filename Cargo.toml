@@ -1,6 +1,6 @@
 [package]
 name = "roon-tui"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["The Appgineer <theappgineer@gmail.com>"]
 edition = "2021"
 license-file = "LICENSE"
@@ -22,7 +22,8 @@ eyre = "0.6"
 any_ascii = "0.3.2"
 rand = "0.8.5"
 clap = { version = "4.4.4", features = ["derive"] }
-roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", tag = "0.1.1", features = ["browse", "transport"] }
+typetag = "0.2"
+roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", rev = "78d05e5", features = ["browse", "settings", "transport"] }
 
 [profile.release]
 strip = true

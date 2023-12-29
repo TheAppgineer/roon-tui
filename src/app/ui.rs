@@ -782,7 +782,7 @@ fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
         "u       Unmute",
         "+       Volume up",
         "-       Volume down",
-        "r       Toggle Repeat",
+        "r       Toggle repeat",
         "s       Toggle shuffle",
         "",
         "__Zone Select Popup__",
