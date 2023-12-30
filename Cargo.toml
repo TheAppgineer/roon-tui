@@ -23,7 +23,7 @@ any_ascii = "0.3.2"
 rand = "0.8.5"
 clap = { version = "4.4.4", features = ["derive"] }
 typetag = "0.2"
-roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", rev = "78d05e5", features = ["browse", "settings", "transport"] }
+roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", rev = "f1ce520", features = ["browse", "settings", "transport"] }
 
 [profile.release]
 strip = true

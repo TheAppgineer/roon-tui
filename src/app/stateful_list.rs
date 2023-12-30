@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use ratatui::widgets::ListState;
 
 pub struct StatefulList<T> {
@@ -6,6 +8,12 @@ pub struct StatefulList<T> {
     pub items: Option<Vec<T>>,
     item_line_count: Vec<usize>,
     page_lines: usize,
+}
+
+impl<T> Default for StatefulList<T> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T> StatefulList<T> {
@@ -29,7 +37,7 @@ impl<T> StatefulList<T> {
     }
 
     pub fn prev(&mut self) {
-        if let Some(_) = self.items {
+        if self.items.is_some() {
             let prev = self.state.selected()
                 .map(|i| if i > 0 { i - 1 } else { 0 });
 
@@ -83,13 +91,17 @@ impl<T> StatefulList<T> {
             for i in selected..item_count {
                 counted_lines += self.item_line_count[i];
 
-                if counted_lines == self.page_lines {
-                    self.state.select(Some(i));
-                    break;
-                } else if counted_lines > self.page_lines {
-                    // Skip the incomplete item at the end
-                    self.state.select(Some(i - 1));
-                    break;
+                match counted_lines.cmp(&self.page_lines) {
+                    Ordering::Equal => {
+                        self.state.select(Some(i));
+                        break;
+                    }
+                    Ordering::Greater => {
+                        // Skip the incomplete item at the end
+                        self.state.select(Some(i - 1));
+                        break;
+                    }
+                    Ordering::Less => {}
                 }
             }
 

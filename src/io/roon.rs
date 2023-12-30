@@ -186,10 +186,7 @@ impl RoonHandler {
             }
             Parsed::SettingsSaved(settings) => {
                 let (end_point, queue_mode) = self.settings.update(settings);
-                let auto_radio = match queue_mode {
-                    QueueMode::RoonRadio => true,
-                    _ => false,
-                };
+                let auto_radio = matches!(queue_mode, QueueMode::RoonRadio);
 
                 if let Some(end_point) = end_point {
                     self.select_zone(end_point).await;
@@ -251,7 +248,7 @@ impl RoonHandler {
                 }
 
                 if self.zone_output_ids.is_none() {
-                    for (_, zone) in &self.zone_map {
+                    for zone in self.zone_map.values() {
                         let mut output_ids = zone.outputs.iter()
                             .map(|output| {
                                 output.output_id.to_owned()
@@ -419,10 +416,10 @@ impl RoonHandler {
 
                             result.items.iter().find_map(|item| if item.title == profile? {Some(item)} else {None})
                         } else {
-                            result.items.iter().next()
+                            result.items.first()
                         }
                     } else {
-                        result.items.iter().find_map(|item| if item.title == step {Some(item)} else {None})
+                        result.items.iter().find(|item| item.title == step)
                     };
 
                     let opts = BrowseOpts {
@@ -517,10 +514,7 @@ impl RoonHandler {
             }
             IoEvent::QueueModeNext => {
                 let queue_mode = self.select_next_queue_mode().await?;
-                let auto_radio = match queue_mode {
-                    QueueMode::RoonRadio => true,
-                    _ => false,
-                };
+                let auto_radio = matches!(queue_mode, QueueMode::RoonRadio);
 
                 self.set_roon_radio(auto_radio).await;
                 self.settings.save();
@@ -603,7 +597,7 @@ impl RoonHandler {
         Some(())
     }
 
-    fn get_grouping<'a>(zone: Option<&Zone>, outputs: &Vec<Output>) -> Option<Vec<(String, String, bool)>> {
+    fn get_grouping(zone: Option<&Zone>, outputs: &Vec<Output>) -> Option<Vec<(String, String, bool)>> {
         let mut grouping = zone?.outputs.iter()
             .map(|output| (output.output_id.to_owned(), output.display_name.to_owned(), true))
             .collect::<Vec<_>>();
@@ -611,11 +605,10 @@ impl RoonHandler {
 
         for output in outputs {
             if can_group_with_output_ids.contains(&output.output_id) {
-                let is_not_in = grouping.iter()
-                    .position(|(output_id, _, _)| *output_id == output.output_id)
-                    .is_none();
+                let is_in = grouping.iter()
+                    .any(|(output_id, _, _)| *output_id == output.output_id);
 
-                if is_not_in {
+                if !is_in {
                     grouping.push((output.output_id.to_owned(), output.display_name.to_owned(), false));
                 }
             }
@@ -632,7 +625,7 @@ impl RoonHandler {
                 if output_ids.len() == preset_output_ids.len() {
                     let matches = preset_output_ids.iter()
                         .filter(|(preset_output_id, _)| {
-                            output_ids.contains(&preset_output_id)
+                            output_ids.contains(preset_output_id)
                         })
                         .count() == preset_output_ids.len();
 
@@ -697,7 +690,7 @@ impl RoonHandler {
 
         let mut outputs = Vec::new();
 
-        for (_, zone) in &self.zone_map {
+        for zone in self.zone_map.values() {
             if zone.outputs.len() > 1 {
                 let new = zone.outputs.iter().map(|output| {
                     (EndPoint::Output(output.output_id.to_owned()), output.display_name.to_owned())
@@ -740,7 +733,7 @@ impl RoonHandler {
 
         if new_zone {
             self.transport.as_ref()?
-                .subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
+                .subscribe_queue(zone_id, QUEUE_ITEM_COUNT).await;
 
             if let Some(browse_path) = self.browse_profile().await {
                 self.browse_paths.insert(zone_id.to_owned(), browse_path);
@@ -780,7 +773,7 @@ impl RoonHandler {
 
         match end_point {
             EndPoint::Output(output_id) => {
-                for (_, zone) in &self.zone_map {
+                for zone in self.zone_map.values() {
                     let contains_output = zone.outputs.iter()
                         .any(|output| {
                             output.output_id == output_id
@@ -872,7 +865,7 @@ impl RoonHandler {
         Some(())
     }
 
-    async fn select_next_queue_mode<'a>(&'a mut self) -> Option<&'a QueueMode> {
+    async fn select_next_queue_mode(&mut self) -> Option<&QueueMode> {
         let zone_id = self.settings.persistent.get_zone_id()?;
         let output_id = self.zone_map.get(zone_id)?.outputs.get(0)?.output_id.as_str();
         let no_profile_set = self.settings.persistent.get_profile().is_none();
@@ -1050,12 +1043,12 @@ impl RoonHandler {
             .map(|output_id| output_id.as_str())
             .collect::<Vec<_>>();
 
-        for (_, zone) in &self.zone_map {
+        for zone in self.zone_map.values() {
             let current_ids = zone.outputs.iter()
                 .map(|output| output.output_id.as_str())
                 .collect::<Vec<_>>();
             let matches_all = output_ids.len() == current_ids.len()
-                && output_ids.get(0) == current_ids.get(0)
+                && output_ids.first() == current_ids.first()
                 && output_ids.iter()
                     .all(|output_id| current_ids.contains(output_id));
             let overlaps = current_ids.iter()

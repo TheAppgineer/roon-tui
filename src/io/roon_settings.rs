@@ -45,7 +45,7 @@ struct QueueModeEntry {
 impl SerTrait for QueueModeEntry {}
 
 impl QueueModeEntry {
-    fn new(title: &str, value: QueueMode) -> BoxedSerTrait {
+    fn from(title: &str, value: QueueMode) -> BoxedSerTrait {
         Box::new(
             Self {
                 title: title.to_owned(),
@@ -65,7 +65,7 @@ struct EndPointEntry {
 impl SerTrait for EndPointEntry {}
 
 impl EndPointEntry {
-    fn new(title: String, value: &str) -> BoxedSerTrait {
+    fn from(title: String, value: &str) -> BoxedSerTrait {
         Box::new(
             Self {
                 title: title.to_owned(),
@@ -214,25 +214,25 @@ impl RoonSettings {
         *zones = zone_list.to_owned();
     }
 
-    fn make_layout(settings: ScratchPad, zone_list: &Vec<(EndPoint, String)>) -> Layout<ScratchPad> {
+    fn make_layout(settings: ScratchPad, zone_list: &[(EndPoint, String)]) -> Layout<ScratchPad> {
         let end_points = zone_list.iter()
             .map(|(end_point, name)| {
                 match end_point {
                     EndPoint::Zone(zone_id) => {
-                        EndPointEntry::new(format!("{}", name), zone_id)
+                        EndPointEntry::from(name.to_owned(), zone_id)
                     }
                     EndPoint::Output(output_id) => {
-                        EndPointEntry::new(format!("<{}>", name), output_id)
+                        EndPointEntry::from(format!("<{}>", name), output_id)
                     }
                     EndPoint::Preset(preset) => {
-                        EndPointEntry::new(format!("[{}]", name), preset)
+                        EndPointEntry::from(format!("[{}]", name), preset)
                     }
                 }
             })
             .collect::<Vec<_>>();
         let zone_list_widget = Widget::Dropdown(Dropdown {
             title: "Zones",
-            subtitle: Some(format!("The available zones, <outputs> and [presets]")),
+            subtitle: Some("The available zones, <outputs> and [presets]".to_owned()),
             values: end_points,
             setting: "zone_id",
         });
@@ -253,15 +253,15 @@ impl RoonSettings {
                 });
             let queue_modes = if settings.profile.is_none() {
                 vec![
-                    QueueModeEntry::new("Manual", QueueMode::Manual),
-                    QueueModeEntry::new("Roon Radio", QueueMode::RoonRadio),
+                    QueueModeEntry::from("Manual", QueueMode::Manual),
+                    QueueModeEntry::from("Roon Radio", QueueMode::RoonRadio),
                 ]
             } else {
                 vec![
-                    QueueModeEntry::new("Manual", QueueMode::Manual),
-                    QueueModeEntry::new("Roon Radio", QueueMode::RoonRadio),
-                    QueueModeEntry::new("Random Album", QueueMode::RandomAlbum),
-                    QueueModeEntry::new("Random Track", QueueMode::RandomTrack),
+                    QueueModeEntry::from("Manual", QueueMode::Manual),
+                    QueueModeEntry::from("Roon Radio", QueueMode::RoonRadio),
+                    QueueModeEntry::from("Random Album", QueueMode::RandomAlbum),
+                    QueueModeEntry::from("Random Track", QueueMode::RandomTrack),
                 ]
             };
             let queue_mode_widget = Widget::Dropdown(Dropdown {

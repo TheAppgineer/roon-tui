@@ -74,15 +74,15 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 }
 
 fn draw_browse_view(frame: &mut Frame, area: Rect, app: &mut App) {
-    let browse_title = format!("{}", app.browse.title.as_deref().unwrap_or("Browse"));
+    let browse_title = app.browse.title.as_deref().unwrap_or("Browse").to_owned();
     let page_lines = area.height.saturating_sub(2) as usize;  // Exclude border
     let view = Some(&View::Browse);
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, view))
+        .border_style(get_border_view_style(app, view))
         .title(Span::styled(
             browse_title,
-            get_text_view_style(&app, view),
+            get_text_view_style(app, view),
         ));
 
     app.browse.prepare_paging(page_lines, |item| if item.subtitle.is_none() {1} else {2});
@@ -98,7 +98,7 @@ fn draw_browse_view(frame: &mut Frame, area: Rect, app: &mut App) {
             .map(|item| {
                 let subtitle = item.subtitle.as_ref().filter(|s| !s.is_empty());
                 let mut lines = vec![
-                    Line::from(Span::styled(&item.title, get_text_view_style(&app, view)))
+                    Line::from(Span::styled(&item.title, get_text_view_style(app, view)))
                 ];
 
                 if let Some(subtitle) = subtitle {
@@ -162,10 +162,10 @@ fn draw_queue_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let view = Some(&View::Queue);
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, view))
+        .border_style(get_border_view_style(app, view))
         .title(Span::styled(
             "Queue",
-            get_text_view_style(&app, view),
+            get_text_view_style(app, view),
         ))
         .title_alignment(Alignment::Right);
 
@@ -196,7 +196,7 @@ fn draw_queue_view(frame: &mut Frame, area: Rect, app: &mut App) {
                 let pad: String = (0..pad_len).map(|_| ' ').collect();
                 let line1 = format!("{}{}{}", line1, pad, duration);
                 let mut lines = vec![
-                    Line::from(Span::styled(line1, get_text_view_style(&app, view))),
+                    Line::from(Span::styled(line1, get_text_view_style(app, view))),
                 ];
 
                 if !item.two_line.line2.is_empty() {
@@ -241,14 +241,12 @@ fn draw_queue_view(frame: &mut Frame, area: Rect, app: &mut App) {
                     ).alignment(Alignment::Left)
                 );
             }
-        } else {
-            if let Some(queue_time_remaining) = get_queue_time_remaining(&app) {
-                block = block.title(
-                    Title::from(
-                        Span::styled(queue_time_remaining, Style::default().fg(Color::Reset))
-                    ).alignment(Alignment::Left)
-                );
-            }
+        } else if let Some(queue_time_remaining) = get_queue_time_remaining(app) {
+            block = block.title(
+                Title::from(
+                    Span::styled(queue_time_remaining, Style::default().fg(Color::Reset))
+                ).alignment(Alignment::Left)
+            );
         }
     }
 
@@ -513,9 +511,9 @@ fn get_status_lines(zone: &Zone, style: Style) -> Vec<Line> {
 
     vec![
         Line::from(Span::styled(volume, style)),
-        Line::from(Span::styled(format!("{}", repeat_icon), style)),
+        Line::from(Span::styled(repeat_icon, style)),
         Line::from(Span::styled(
-            format!("{}", if settings.shuffle {"Shuffle  On"} else {"Shuffle Off"}),
+            if settings.shuffle {"Shuffle  On"} else {"Shuffle Off"},
             style
         )),
     ]
@@ -530,10 +528,10 @@ fn draw_prompt_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let prompt = app.prompt.as_str();
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, view))
+        .border_style(get_border_view_style(app, view))
         .title(Span::styled(
             prompt,
-            get_text_view_style(&app, view),
+            get_text_view_style(app, view),
         ))
         .title_alignment(Alignment::Left);
 
@@ -561,10 +559,10 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let view = Some(&View::Zones);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, view))
+        .border_style(get_border_view_style(app, view))
         .title(Span::styled(
             "Zones",
-            get_text_view_style(&app, view),
+            get_text_view_style(app, view),
         ))
         .title_alignment(Alignment::Left);
 
@@ -586,7 +584,7 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
                 };
                 let line = Span::styled(
                     name,
-                    get_text_view_style(&app, view));
+                    get_text_view_style(app, view));
                 ListItem::new(Line::from(line)).style(Style::default())
             })
             .collect();
@@ -693,7 +691,7 @@ fn draw_grouping_view(frame: &mut Frame, area: Rect, app: &mut App) -> Option<()
             let state = if *included {checked_symbol} else {unchecked_symbol};
             let line = Span::styled(
                 format!("{}  {}", state, name),
-                get_text_view_style(&app, Some(&View::Grouping)));
+                get_text_view_style(app, Some(&View::Grouping)));
 
             ListItem::new(Line::from(line)).style(Style::default())
         })
@@ -719,10 +717,10 @@ fn draw_help_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let view = Some(&View::Help);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(get_border_view_style(&app, view))
+        .border_style(get_border_view_style(app, view))
         .title(Span::styled(
             "Help",
-            get_text_view_style(&app, view),
+            get_text_view_style(app, view),
         ))
         .title_alignment(Alignment::Left);
     let chunk = Layout::default()

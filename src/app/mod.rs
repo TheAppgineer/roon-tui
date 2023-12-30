@@ -170,10 +170,7 @@ impl App {
                     if let Some(items) = self.zones.items.as_ref() {
                         let has_zones = items.iter()
                             .any(|(endpoint, _)| {
-                                match endpoint {
-                                    EndPoint::Zone(_) => true,
-                                    _ => false,
-                                }
+                                matches!(endpoint, EndPoint::Zone(_))
                             });
 
                         if has_zones {
@@ -461,8 +458,7 @@ impl App {
                             };
                             let result = if split {
                                 title.split(' ')
-                                    .position(matching)
-                                    .is_some()
+                                    .any(matching)
                             } else {
                                 let title = title
                                     .to_ascii_lowercase()
@@ -494,18 +490,13 @@ impl App {
 
                         if split {
                             title.split(' ')
-                                .position(|sub| sub.starts_with(input.as_str()))
-                                .is_some()
+                                .any(|sub| sub.starts_with(input.as_str()))
                         } else {
                             title.starts_with(input.as_str())
                         }
                     });
 
-                if let Some(position) = position {
-                    Some(skip + position)
-                } else {
-                    None
-                }
+                position.map(|position| skip + position)
             };
 
             if index.is_some() {
@@ -548,13 +539,10 @@ impl App {
                     }
                 }
                 KeyModifiers::SHIFT => {
-                    match key.code {
-                        KeyCode::BackTab => {
-                            self.input.clear();
-                            self.browse_match_list.clear();
-                            self.select_prev_view();
-                        }
-                        _ => (),
+                    if key.code == KeyCode::BackTab {
+                        self.input.clear();
+                        self.browse_match_list.clear();
+                        self.select_prev_view();
                     }
                 }
                 KeyModifiers::CONTROL => {
@@ -626,9 +614,8 @@ impl App {
                 }
             }
             KeyModifiers::SHIFT => {
-                match key.code {
-                    KeyCode::Char(key) => self.select_by_input(key),
-                    _ => (),
+                if let KeyCode::Char(key) = key.code {
+                    self.select_by_input(key);
                 }
             }
             KeyModifiers::NONE => {
@@ -716,9 +703,8 @@ impl App {
     async fn handle_prompt_key_codes(&mut self, key: KeyEvent) {
         match key.modifiers {
             KeyModifiers::SHIFT => {
-                match key.code {
-                    KeyCode::Char(to_insert) => self.enter_char(to_insert),
-                    _ => (),
+                if let KeyCode::Char(to_insert) = key.code {
+                    self.enter_char(to_insert);
                 }
             }
             KeyModifiers::NONE => {
@@ -772,10 +758,8 @@ impl App {
                 self.restore_view();
             }
             KeyCode::Delete => {
-                if let Some((end_point, _)) = self.zones.get_selected_item() {
-                    if let EndPoint::Preset(preset) = end_point {
-                        self.to_roon.send(IoEvent::ZoneDeletePreset(preset.to_owned())).await.unwrap();
-                    }
+                if let Some((EndPoint::Preset(preset), _)) = self.zones.get_selected_item() {
+                    self.to_roon.send(IoEvent::ZoneDeletePreset(preset.to_owned())).await.unwrap();
                 }
             }
             KeyCode::Esc => self.restore_view(),
@@ -839,9 +823,8 @@ impl App {
     async fn handle_preset_key_codes(&mut self, key: KeyEvent) {
         match key.modifiers {
             KeyModifiers::SHIFT => {
-                match key.code {
-                    KeyCode::Char(to_insert) => self.enter_char(to_insert),
-                    _ => (),
+                if let KeyCode::Char(to_insert) = key.code {
+                    self.enter_char(to_insert);
                 }
             }
             KeyModifiers::NONE => {
@@ -899,7 +882,7 @@ impl App {
         Some(self.queue.get_selected_item()?.queue_item_id)
     }
 
-    fn get_included_output_ids(&self, items: &Vec<(String, String, bool)>) -> Vec<String> {
+    fn get_included_output_ids(&self, items: &[(String, String, bool)]) -> Vec<String> {
         items.iter()
             .filter_map(|(output_id, _, included)| {
                 if *included {
