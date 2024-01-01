@@ -4,7 +4,14 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::str::FromStr;
 use std::{collections::HashMap, fs, path};
 use std::sync::Arc;
-use tokio::{sync::{mpsc::{Receiver, Sender}, Mutex}, time::{Duration, sleep}, select};
+use tokio::{
+    sync::{
+        mpsc::{Receiver, Sender},
+        Mutex,
+    },
+    time::{Duration, sleep},
+    select,
+};
 
 use roon_api::{
     info,
@@ -15,8 +22,18 @@ use roon_api::{
     RoonApi,
     Services,
     settings,
-    Svc,
-    transport::{Control, Output, QueueItem, Repeat, Seek, State, Transport, volume, Zone},
+    transport::{
+        Control,
+        NowPlaying,
+        Output,
+        QueueItem,
+        Repeat,
+        Seek,
+        State,
+        Transport,
+        volume,
+        Zone
+    },
 };
 
 use super::{EndPoint, IoEvent, QueueMode, roon_settings::RoonSettings};
@@ -40,6 +57,7 @@ struct RoonHandler {
     zone_output_ids: Option<Vec<String>>,
     orphaned_output_id: Option<String>,
     matched_zones: HashMap<String, String>,
+    now_playing: Option<NowPlaying>,
     pause_on_track_end: bool,
     browse_reached_home: bool,
     browse_paths: HashMap<String, Vec<&'static str>>,
@@ -70,7 +88,7 @@ pub async fn start(options: Options, to_app: Sender<IoEvent>, from_app: Receiver
                 Services::Transport(Transport::new()),
                 Services::Settings(settings_api),
             ]);
-            let provided: HashMap<String, Svc> = HashMap::from([
+            let provided = HashMap::from([
                 (settings::SVCNAME.to_owned(), svc),
             ]);
             let config_path_clone = config_path.clone();
@@ -118,7 +136,7 @@ pub async fn start(options: Options, to_app: Sender<IoEvent>, from_app: Receiver
                 handlers.join_next().await;
             }
 
-            sleep(Duration::from_secs(10)).await;
+            sleep(Duration::from_secs(3)).await;
         }
     });
 }
@@ -140,6 +158,7 @@ impl RoonHandler {
             zone_output_ids: None,
             orphaned_output_id: None,
             matched_zones: HashMap::new(),
+            now_playing: None,
             pause_on_track_end: false,
             browse_reached_home: false,
             browse_paths: HashMap::new(),
@@ -196,16 +215,18 @@ impl RoonHandler {
                 self.settings.save();
                 self.to_app.send(IoEvent::QueueModeCurrent(queue_mode)).await.unwrap();
             }
-            Parsed::Zones(zones) => {
+            Parsed::Zones(mut zones) => {
                 if let Some(output_ids) = self.zone_output_ids.as_ref() {
                     // Find the zone_id assigned to the new group
-                    let zone_id = zones.iter()
+                    let zone_id = zones.iter_mut()
                         .find_map(|zone| {
                             let count = zone.outputs.iter()
                                 .filter(|output| output_ids.contains(&output.output_id))
                                 .count();
 
                             if count == output_ids.len() {
+                                zone.now_playing = self.now_playing.take();
+
                                 Some(zone.zone_id.to_owned())
                             } else {
                                 None
@@ -217,14 +238,14 @@ impl RoonHandler {
                         self.settings.save();
                         self.zone_output_ids = None;
                     }
-                }
-
-                if let Some(output_id) = self.orphaned_output_id.take() {
+                } else if let Some(output_id) = self.orphaned_output_id.take() {
                     // Find the zone_id assigned to the separated output
-                    let zone_id = zones.iter()
+                    let zone_id = zones.iter_mut()
                         .find_map(|zone| {
-                            if let Some(output) = zone.outputs.get(0) {
+                            if let Some(output) = zone.outputs.first() {
                                 if output.output_id == output_id {
+                                    zone.now_playing = self.now_playing.take();
+
                                     Some(zone.zone_id.to_owned())
                                 } else {
                                     None
@@ -236,6 +257,8 @@ impl RoonHandler {
 
                     self.settings.persistent.set_zone_id(zone_id);
                     self.settings.save();
+                } else {
+                    self.now_playing.take();
                 }
 
                 let new_zone = match self.settings.persistent.get_zone_id() {
@@ -270,14 +293,19 @@ impl RoonHandler {
                     let zone_id = zone_id.to_owned();
 
                     if zone_ids.contains(&zone_id) {
+                        let zone = self.zone_map.get(&zone_id)?;
+
+                        // Store now playing info to restore after (un)grouping
+                        self.now_playing = zone.now_playing.to_owned();
+
                         self.to_app.send(IoEvent::ZoneRemoved(zone_id)).await.unwrap();
                         self.to_app.send(IoEvent::ZonePresetMatched(None)).await.unwrap();
                     }
                 }
 
-                for zone_id in zone_ids {
-                    self.matched_zones.remove(&zone_id);
-                    self.zone_map.remove(&zone_id);
+                for zone_id in zone_ids.iter() {
+                    self.matched_zones.remove(zone_id);
+                    self.zone_map.remove(zone_id);
                 }
 
                 // Take care of a pending grouping
@@ -312,7 +340,7 @@ impl RoonHandler {
                     if seek.queue_time_remaining >= 0 && seek.queue_time_remaining <= 3 {
                         let zone = self.zone_map.get(&seek.zone_id);
 
-                        if let Some(browse_path) = self.handle_queue_mode(zone, true).await {
+                        if let Some(browse_path) = self.handle_queue_mode(zone, false).await {
                             self.browse_paths.insert(seek.zone_id, browse_path);
                         }
                     }
@@ -601,7 +629,7 @@ impl RoonHandler {
         let mut grouping = zone?.outputs.iter()
             .map(|output| (output.output_id.to_owned(), output.display_name.to_owned(), true))
             .collect::<Vec<_>>();
-        let can_group_with_output_ids = &zone?.outputs.get(0)?.can_group_with_output_ids;
+        let can_group_with_output_ids = &zone?.outputs.first()?.can_group_with_output_ids;
 
         for output in outputs {
             if can_group_with_output_ids.contains(&output.output_id) {
@@ -738,9 +766,6 @@ impl RoonHandler {
             if let Some(browse_path) = self.browse_profile().await {
                 self.browse_paths.insert(zone_id.to_owned(), browse_path);
             }
-
-            // Force full refresh of zone data
-            self.transport.as_ref()?.get_zones().await;
         }
 
         if zone.state != State::Playing {
@@ -754,11 +779,11 @@ impl RoonHandler {
         }
 
         let matched_preset = self.matched_zones.get(zone_id).cloned();
-        let output_id = zone.outputs
-            .get(0)
+        let prim_output_id = zone.outputs
+            .first()
             .map(|output| output.output_id.as_str());
 
-        self.settings.persistent.set_prim_output_id(output_id);
+        self.settings.persistent.set_prim_output_id(prim_output_id);
 
         self.to_app.send(IoEvent::ZonePresetMatched(matched_preset)).await.unwrap();
         self.to_app.send(IoEvent::ZoneChanged(zone)).await.unwrap();
@@ -808,10 +833,10 @@ impl RoonHandler {
                     self.to_app.send(IoEvent::ZonePresetMatched(matched_preset)).await.unwrap();
                     self.to_app.send(IoEvent::ZoneChanged(zone.to_owned())).await.unwrap();
 
-                    let output_id = zone.outputs
-                        .get(0)
+                    let prim_output_id = zone.outputs
+                        .first()
                         .map(|output| output.output_id.as_str());
-                    self.settings.persistent.set_prim_output_id(output_id);
+                    self.settings.persistent.set_prim_output_id(prim_output_id);
                 }
 
                 // Store the zone_id in settings before it is used again in sync_and_save_queue_mode
@@ -839,7 +864,7 @@ impl RoonHandler {
     async fn sync_and_save_queue_mode(&mut self) -> Option<()> {
         let zone_id = self.settings.persistent.get_zone_id()?.to_owned();
         let zone = self.zone_map.get(&zone_id)?;
-        let output_id = zone.outputs.get(0)?.output_id.as_str();
+        let output_id = zone.outputs.first()?.output_id.as_str();
         let queue_modes = self.settings.persistent.get_queue_modes_mut()?;
 
         if let Some(queue_mode) = queue_modes.remove(&zone_id) {
@@ -867,7 +892,7 @@ impl RoonHandler {
 
     async fn select_next_queue_mode(&mut self) -> Option<&QueueMode> {
         let zone_id = self.settings.persistent.get_zone_id()?;
-        let output_id = self.zone_map.get(zone_id)?.outputs.get(0)?.output_id.as_str();
+        let output_id = self.zone_map.get(zone_id)?.outputs.first()?.output_id.as_str();
         let no_profile_set = self.settings.persistent.get_profile().is_none();
         let queue_modes = self.settings.persistent.get_queue_modes_mut()?;
 
@@ -912,7 +937,7 @@ impl RoonHandler {
     ) -> Option<Vec<&'static str>> {
         let zone = zone?;
         let zone_id = zone.zone_id.as_str();
-        let output_id = zone.outputs.get(0)?.output_id.as_str();
+        let output_id = zone.outputs.first()?.output_id.as_str();
         let queue_mode = self.settings.persistent.get_queue_modes()?.get(output_id)?;
 
         if play {
@@ -1064,7 +1089,7 @@ impl RoonHandler {
                 }
 
                 return None;
-            } else  if current_ids.len() > 1 && overlaps {
+            } else if current_ids.len() > 1 && overlaps {
                 self.transport.as_ref()?.ungroup_outputs(current_ids).await;
 
                 return Some(new_ids);
