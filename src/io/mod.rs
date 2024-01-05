@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod events;
 pub mod roon;
+mod roon_browse;
 mod roon_settings;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
