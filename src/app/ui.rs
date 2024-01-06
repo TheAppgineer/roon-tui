@@ -581,6 +581,7 @@ fn draw_zones_view(frame: &mut Frame, area: Rect, app: &mut App) {
                     EndPoint::Preset(_) => format!("[{}]", name),
                     EndPoint::Output(_) => format!("<{}>", name),
                     EndPoint::Zone(_) => name.to_owned(),
+                    EndPoint::MatchedPreset((_, preset)) => preset.to_owned(),
                 };
                 let line = Span::styled(
                     name,

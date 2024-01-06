@@ -227,6 +227,9 @@ impl RoonSettings {
                     EndPoint::Preset(preset) => {
                         EndPointEntry::from(format!("[{}]", name), preset)
                     }
+                    EndPoint::MatchedPreset((zone_id, preset)) => {
+                        EndPointEntry::from(preset.to_owned(), zone_id)
+                    }
                 }
             })
             .collect::<Vec<_>>();
@@ -243,7 +246,14 @@ impl RoonSettings {
                     match end_point {
                         EndPoint::Zone(zone_id) => {
                             if zone_id == set_zone_id {
-                                Some(name.as_str())
+                                Some((name.as_str(), None))
+                            } else {
+                                None
+                            }
+                        }
+                        EndPoint::MatchedPreset((zone_id, preset)) => {
+                            if zone_id == set_zone_id {
+                                Some((preset.as_str(), Some(name.as_str())))
                             } else {
                                 None
                             }
@@ -271,10 +281,13 @@ impl RoonSettings {
                 setting: "queue_mode",
             });
 
-            if let Some(zone_name) = zone_name {
+            if let Some((zone_name, group_name)) = zone_name {
+                let subtitle = group_name.map(|group_name| {
+                    format!("The group name in Roon is \"{}\"", group_name)
+                });
                 let zone_name_widget = Widget::Label(Label {
                     title: format!("The currently controlled zone is {}", zone_name),
-                    subtitle: None,
+                    subtitle,
                 });
 
                 vec![

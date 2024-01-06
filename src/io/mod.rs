@@ -21,6 +21,7 @@ pub enum EndPoint {
     Zone(String),
     Output(String),
     Preset(String),
+    MatchedPreset((String, String)),
 }
 
 #[derive(Debug)]

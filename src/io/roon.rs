@@ -509,12 +509,14 @@ impl RoonHandler {
         let mut zones = self.zone_map
             .iter()
             .map(|(zone_id, zone)| {
-                let display_name = match self.matched_zones.get(zone_id) {
-                    Some(preset) => preset.as_str(),
-                    None => zone.display_name.as_str(),
-                };
+                match self.matched_zones.get(zone_id) {
+                    Some(preset) => {
+                        let matched_preset = EndPoint::MatchedPreset((zone_id.to_owned(), preset.to_owned()));
 
-                (EndPoint::Zone(zone_id.to_owned()), display_name.to_owned())
+                        (matched_preset, zone.display_name.to_owned())
+                    }
+                    None => (EndPoint::Zone(zone_id.to_owned()), zone.display_name.to_owned()),
+                }
             })
             .collect::<Vec<_>>();
 
@@ -622,7 +624,7 @@ impl RoonHandler {
                     }
                 }
             }
-            EndPoint::Zone(zone_id) => {
+            EndPoint::Zone(zone_id) | EndPoint::MatchedPreset((zone_id, _)) => {
                 transport.subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
 
                 self.browse.as_mut()?.browse_profile(&zone_id).await;
