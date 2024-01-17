@@ -134,13 +134,18 @@ impl App {
                     }
                 }
                 IoEvent::QueueModeCurrent(queue_mode) => {
-                    let queue_mode = match queue_mode {
-                        QueueMode::Manual => None,
-                        QueueMode::RoonRadio => Some("Roon Radio"),
-                        QueueMode::RandomAlbum => Some("Random Album"),
-                        QueueMode::RandomTrack => Some("Random Track"),
-                    };
-                    self.queue_mode = queue_mode;
+                    self.queue_mode = queue_mode
+                        .map(|queue_mode| {
+                            match queue_mode {
+                                QueueMode::Manual => "",
+                                QueueMode::RoonRadio => "Roon Radio",
+                                QueueMode::RandomAlbum => "Random Album",
+                                QueueMode::RandomTrack => "Random Track",
+                            }
+                        })
+                        .filter(|queue_mode| {
+                            !queue_mode.is_empty()
+                        });
                 }
                 IoEvent::Zones(zones) => {
                     self.zones.items = Some(zones);

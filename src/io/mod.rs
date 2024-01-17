@@ -43,7 +43,7 @@ pub enum IoEvent {
     QueueClear,
     QueueModeNext,
     QueueModeAppend,
-    QueueModeCurrent(QueueMode),
+    QueueModeCurrent(Option<QueueMode>),
     Zones(Vec<(EndPoint, String)>),
     ZoneSelect,
     ZoneSelected(EndPoint),

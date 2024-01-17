@@ -13,9 +13,8 @@ use super::{EndPoint, QueueMode};
 type Grouping = Vec<(String, Option<f32>)>;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct Persistent {
+struct Persistent {
     zone_id: Option<String>,
-    prim_output_id: Option<String>,
     profile: Option<String>,
     queue_modes: Option<HashMap<String, QueueMode>>,
     presets: Option<HashMap<String, Grouping>>,
@@ -25,12 +24,13 @@ pub struct Persistent {
 struct ScratchPad {
     zone_id: Option<String>,
     profile: Option<String>,
-    queue_mode: QueueMode,
+    queue_mode: Option<QueueMode>,
+    dirty: bool,
 }
 
 #[derive(Debug, Default)]
 pub struct RoonSettings {
-    pub persistent: Persistent,
+    persistent: Arc<Mutex<Persistent>>,
     config_path: Arc<String>,
     zone_list: Arc<Mutex<Vec<(EndPoint, String)>>>,
 }
@@ -89,62 +89,27 @@ impl Persistent {
 
         this
     }
-
-    pub fn get_zone_id(&self) -> Option<&str> {
-        self.zone_id.as_deref()
-    }
-
-    pub fn set_zone_id(&mut self, zone_id: Option<String>) {
-        self.zone_id = zone_id;
-    }
-
-    pub fn set_prim_output_id(&mut self, prim_output_id: Option<&str>) {
-        self.prim_output_id = prim_output_id.map(|output_id| output_id.to_owned());
-    }
-
-    pub fn get_profile(&self) -> Option<&str> {
-        self.profile.as_deref()
-    }
-
-    pub fn set_profile(&mut self, profile: Option<String>) {
-        self.profile = profile;
-    }
-
-    pub fn get_presets(&self) -> Option<&HashMap<String, Grouping>> {
-        self.presets.as_ref()
-    }
-
-    pub fn get_presets_mut(&mut self) -> Option<&mut HashMap<String, Grouping>> {
-        self.presets.as_mut()
-    }
-
-    pub fn get_queue_modes(&self) -> Option<&HashMap<String, QueueMode>> {
-        self.queue_modes.as_ref()
-    }
-
-    pub fn get_queue_modes_mut(&mut self) -> Option<&mut HashMap<String, QueueMode>> {
-        self.queue_modes.as_mut()
-    }
 }
 
 impl ScratchPad {
     fn from(persistent: &Persistent) -> Self {
         let zone_id = persistent.zone_id.to_owned();
         let profile = persistent.profile.to_owned();
-        let queue_mode = if let Some(prim_output_id) = persistent.prim_output_id.as_deref() {
-            if let Some(queue_mode) = persistent.get_queue_modes() {
-                queue_mode.get(prim_output_id).cloned().unwrap_or_default()
+        let queue_mode = if let Some(zone_id) = zone_id.as_deref() {
+            if let Some(queue_modes) = persistent.queue_modes.as_ref() {
+                Some(queue_modes.get(zone_id).cloned().unwrap_or_default())
             } else {
-                QueueMode::Manual
+                None
             }
         } else {
-            QueueMode::Manual
+            None
         };
 
         ScratchPad {
             zone_id,
             profile,
             queue_mode,
+            dirty: false,
         }
     }
 }
@@ -152,14 +117,20 @@ impl ScratchPad {
 impl RoonSettings {
     pub fn new(roon: &RoonApi, config_path: Arc<String>) -> (Svc, Settings, RoonSettings) {
         let value = RoonApi::load_config(&config_path, "settings");
+        let persistent = Arc::new(Mutex::new(Persistent::new(value)));
         let config_path_clone = config_path.clone();
         let zone_list = Arc::new(Mutex::new(Vec::new()));
 
         let zone_list_clone = zone_list.clone();
+        let persistent_clone = persistent.clone();
         let get_layout_cb = move |settings: Option<ScratchPad>| -> Layout<ScratchPad> {
             let zone_list = zone_list_clone.lock().unwrap();
             let settings = match settings {
-                Some(settings) => settings,
+                Some(mut settings) => {
+                    let persistent = persistent_clone.lock().unwrap();
+                    Self::sync(&persistent, &mut settings);
+                    settings
+                },
                 None => {
                     let value = RoonApi::load_config(&config_path_clone, "settings");
                     let persistent = Persistent::new(value);
@@ -176,7 +147,7 @@ impl RoonSettings {
         );
         let this = RoonSettings {
             config_path,
-            persistent: Persistent::new(value),
+            persistent,
             zone_list,
         };
 
@@ -189,8 +160,12 @@ impl RoonSettings {
         RoonApi::save_config(&self.config_path, "settings", settings).unwrap();
     }
 
-    pub fn update(&mut self, settings: serde_json::Value) -> (Option<EndPoint>, QueueMode) {
+    pub fn update(&mut self, settings: serde_json::Value) -> Option<EndPoint> {
         let scratch_pad = serde_json::from_value::<ScratchPad>(settings).unwrap();
+        let mut persistent = self.persistent.lock().unwrap();
+
+        persistent.zone_id = scratch_pad.zone_id.to_owned();
+
         let end_point = scratch_pad.zone_id.map(|end_point_id| {
             match end_point_id.chars().nth(1) {
                 Some('6') => EndPoint::Zone(end_point_id),
@@ -198,20 +173,132 @@ impl RoonSettings {
                 _ => EndPoint::Preset(end_point_id),
             }
         });
+        let zone_id = persistent.zone_id.to_owned()?;
 
-        if let Some(queue_modes) = self.persistent.queue_modes.as_mut() {
-            if let Some(output_id) = self.persistent.prim_output_id.as_ref() {
-                queue_modes.insert(output_id.to_owned(), scratch_pad.queue_mode.to_owned());
-            }
-        }
+        persistent.queue_modes.as_mut()?.insert(zone_id, scratch_pad.queue_mode?);
 
-        (end_point, scratch_pad.queue_mode)
+        end_point
     }
 
     pub fn set_zone_list(&mut self, zone_list: &Vec<(EndPoint, String)>) {
         let mut zones = self.zone_list.lock().unwrap();
 
         *zones = zone_list.to_owned();
+    }
+
+    pub fn add_preset(&mut self, name: String, preset: Grouping) -> Option<()> {
+        let mut persistent = self.persistent.lock().unwrap();
+        let presets = persistent.presets.as_mut()?;
+
+        presets.insert(name, preset);
+
+        Some(())
+    }
+
+    pub fn remove_preset(&mut self, name: &str) -> Option<Grouping> {
+        let mut persistent = self.persistent.lock().unwrap();
+        let presets = persistent.presets.as_mut()?;
+
+        presets.remove(name)
+    }
+
+    pub fn get_preset_names(&self) -> Option<Vec<String>> {
+        let persistent = self.persistent.lock().unwrap();
+
+        Some(persistent.presets.as_ref()?.keys()
+            .map(|name| name.to_owned())
+            .collect::<Vec<_>>())
+    }
+
+    pub fn get_preset(&self, name: &str) -> Option<Grouping> {
+        let persistent = self.persistent.lock().unwrap();
+
+        persistent.presets.as_ref()?.get(name).cloned()
+    }
+
+    pub fn match_preset(&self, output_ids: &mut Vec<String>) -> Option<String> {
+        let persistent = self.persistent.lock().unwrap();
+
+        output_ids[1..].sort();
+
+        persistent.presets.as_ref()?.iter()
+            .find_map(|(preset, preset_output_ids)| {
+                if output_ids.len() == preset_output_ids.len() {
+                    let matches = preset_output_ids.iter()
+                        .filter(|(preset_output_id, _)| {
+                            output_ids.contains(preset_output_id)
+                        })
+                        .count() == preset_output_ids.len();
+
+                    if matches {
+                        Some(preset.to_owned())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn get_queue_mode(&self) -> Option<QueueMode> {
+        let persistent = self.persistent.lock().unwrap();
+        let queue_modes = persistent.queue_modes.as_ref()?;
+        let zone_id = persistent.zone_id.as_deref()?;
+
+        Some(queue_modes.get(zone_id).cloned().unwrap_or_default())
+    }
+
+    pub fn set_queue_mode(&mut self, zone_or_output_id: &str, queue_mode: QueueMode) -> Option<()> {
+        let mut persistent = self.persistent.lock().unwrap();
+        let queue_modes = persistent.queue_modes.as_mut()?;
+
+        log::info!("set_queue_mode: {} {:?}", zone_or_output_id, queue_mode);
+        queue_modes.insert(zone_or_output_id.to_owned(), queue_mode);
+
+        Some(())
+    }
+
+    pub fn remove_queue_mode(&self, zone_or_output_id: &str) -> Option<QueueMode> {
+        let mut persistent = self.persistent.lock().unwrap();
+
+        persistent.queue_modes.as_mut()?.remove(zone_or_output_id)
+    }
+
+    pub fn get_zone_id(&self) -> Option<String> {
+        let persistent = &self.persistent.lock().unwrap();
+
+        persistent.zone_id.to_owned()
+    }
+
+    pub fn set_zone_id(&mut self, zone_id: Option<String>) {
+        let mut persistent = self.persistent.lock().unwrap();
+
+        persistent.zone_id = zone_id;
+    }
+
+    pub fn get_profile(&self) -> Option<String> {
+        let persistent = &self.persistent.lock().unwrap();
+
+        persistent.profile.to_owned()
+    }
+
+    pub fn set_profile(&mut self, profile: Option<String>) {
+        let mut persistent = self.persistent.lock().unwrap();
+
+        persistent.profile = profile;
+    }
+
+    fn sync(persistent: &Persistent, settings: &mut ScratchPad) -> Option<()> {
+        if !settings.dirty && settings.zone_id != persistent.zone_id {
+            let zone_id = settings.zone_id.as_deref()?;
+            let queue_mode = persistent.queue_modes.as_ref()?.get(zone_id);
+
+            settings.queue_mode = Some(queue_mode.cloned().unwrap_or_default());
+            settings.dirty = true;
+        }
+
+        Some(())
     }
 
     fn make_layout(settings: ScratchPad, zone_list: &[(EndPoint, String)]) -> Layout<ScratchPad> {

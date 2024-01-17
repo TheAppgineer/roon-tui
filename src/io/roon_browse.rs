@@ -6,7 +6,7 @@ use roon_api::{
 use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 
-use super::{IoEvent, roon_settings::Persistent, QueueMode};
+use super::{IoEvent, QueueMode, roon_settings::RoonSettings};
 
 const TUI_BROWSE: &str = "tui_browse";
 
@@ -42,7 +42,7 @@ impl RoonBrowse {
     pub async fn handle_msg_event(
         &mut self,
         parsed: Parsed,
-        persistent: &Persistent,
+        profile: Option<&str>,
         no_active_zones: bool,
     ) -> Option<()> {
         match parsed {
@@ -125,8 +125,6 @@ impl RoonBrowse {
 
                     let item = if step.is_empty() {
                         if result.list.title == "Profile" {
-                            let profile = persistent.get_profile();
-
                             result.items.iter().find_map(|item| if item.title == profile? {Some(item)} else {None})
                         } else {
                             result.items.first()
@@ -151,7 +149,7 @@ impl RoonBrowse {
         Some(())
     }
 
-    pub async fn handle_io_event(&mut self, io_event: IoEvent, persistent: &mut Persistent) -> Option<bool> {
+    pub async fn handle_io_event(&mut self, io_event: IoEvent, settings: &mut RoonSettings) -> Option<bool> {
         let mut has_changed = false;
 
         // Only one of item_key, pop_all, pop_levels, and refresh_list may be populated
@@ -165,10 +163,10 @@ impl RoonBrowse {
                 let profile = self.get_profile_name(item_key.as_deref());
 
                 if profile.is_some() {
-                    if let Some(zone_id) = persistent.get_zone_id() {
+                    if let Some(zone_id) = settings.get_zone_id() {
                         let zone_id = zone_id.to_owned();
 
-                        persistent.set_profile(profile);
+                        settings.set_profile(profile);
                         has_changed = true;
 
                         self.browse_profile(&zone_id).await;
