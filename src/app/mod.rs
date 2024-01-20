@@ -560,7 +560,8 @@ impl App {
                         KeyCode::Char('e') => self.to_roon.send(IoEvent::PauseOnTrackEndReq).await.unwrap(),
                         KeyCode::Char('p') | KeyCode::Char(' ') => self.to_roon.send(IoEvent::Control(Control::PlayPause)).await.unwrap(),
                         KeyCode::Char('q') => self.to_roon.send(IoEvent::QueueModeNext).await.unwrap(),
-                        KeyCode::Char('a') => self.to_roon.send(IoEvent::QueueModeAppend).await.unwrap(),
+                        KeyCode::Char('a') => self.to_roon.send(IoEvent::QueueAppend).await.unwrap(),
+                        KeyCode::Char('n') => self.to_roon.send(IoEvent::QueueNext).await.unwrap(),
                         KeyCode::Char('z') => {
                             if selected_view != Some(View::Zones) {
                                 match selected_view {

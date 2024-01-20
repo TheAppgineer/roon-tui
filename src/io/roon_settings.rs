@@ -12,6 +12,14 @@ use super::{EndPoint, QueueMode};
 
 type Grouping = Vec<(String, Option<f32>)>;
 
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueAction {
+    PlayNow,
+    AddNext,
+    Queue,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 struct Persistent {
     zone_id: Option<String>,
@@ -25,6 +33,7 @@ struct ScratchPad {
     zone_id: Option<String>,
     profile: Option<String>,
     queue_mode: Option<QueueMode>,
+    queue_action: Option<QueueAction>,
     dirty: bool,
 }
 
@@ -46,6 +55,26 @@ impl SerTrait for QueueModeEntry {}
 
 impl QueueModeEntry {
     fn from(title: &str, value: QueueMode) -> BoxedSerTrait {
+        Box::new(
+            Self {
+                title: title.to_owned(),
+                value,
+            }
+        ) as BoxedSerTrait
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct QueueActionEntry {
+    title: String,
+    value: QueueAction,
+}
+
+#[typetag::serde]
+impl SerTrait for QueueActionEntry {}
+
+impl QueueActionEntry {
+    fn from(title: &str, value: QueueAction) -> BoxedSerTrait {
         Box::new(
             Self {
                 title: title.to_owned(),
@@ -109,6 +138,7 @@ impl ScratchPad {
             zone_id,
             profile,
             queue_mode,
+            queue_action: None,
             dirty: false,
         }
     }
@@ -160,7 +190,7 @@ impl RoonSettings {
         RoonApi::save_config(&self.config_path, "settings", settings).unwrap();
     }
 
-    pub fn update(&mut self, settings: serde_json::Value) -> Option<EndPoint> {
+    pub fn update(&mut self, settings: serde_json::Value) -> Option<(EndPoint, Option<QueueAction>)> {
         let scratch_pad = serde_json::from_value::<ScratchPad>(settings).unwrap();
         let mut persistent = self.persistent.lock().unwrap();
 
@@ -172,12 +202,12 @@ impl RoonSettings {
                 Some('7') => EndPoint::Output(end_point_id),
                 _ => EndPoint::Preset(end_point_id),
             }
-        });
+        })?;
         let zone_id = persistent.zone_id.to_owned()?;
 
         persistent.queue_modes.as_mut()?.insert(zone_id, scratch_pad.queue_mode?);
 
-        end_point
+        Some((end_point, scratch_pad.queue_action))
     }
 
     pub fn set_zone_list(&mut self, zone_list: &Vec<(EndPoint, String)>) {
@@ -253,7 +283,6 @@ impl RoonSettings {
         let mut persistent = self.persistent.lock().unwrap();
         let queue_modes = persistent.queue_modes.as_mut()?;
 
-        log::info!("set_queue_mode: {} {:?}", zone_or_output_id, queue_mode);
         queue_modes.insert(zone_or_output_id.to_owned(), queue_mode);
 
         Some(())
@@ -326,8 +355,9 @@ impl RoonSettings {
             values: end_points,
             setting: "zone_id",
         });
+        let mut widgets = Vec::new();
 
-        let widgets = if let Some(set_zone_id) = settings.zone_id.as_deref() {
+        if let Some(set_zone_id) = settings.zone_id.as_deref() {
             let zone_name = zone_list.iter()
                 .find_map(|(end_point, name)| {
                     match end_point {
@@ -361,9 +391,14 @@ impl RoonSettings {
                     QueueModeEntry::from("Random Track", QueueMode::RandomTrack),
                 ]
             };
+            let subtitle = if settings.profile.is_none() {
+                Some("Select a profile in Roon TUI Browse View for additional modes".to_owned())
+            } else {
+                None
+            };
             let queue_mode_widget = Widget::Dropdown(Dropdown {
                 title: "Queue Mode",
-                subtitle: None,
+                subtitle,
                 values: queue_modes,
                 setting: "queue_mode",
             });
@@ -377,21 +412,34 @@ impl RoonSettings {
                     subtitle,
                 });
 
-                vec![
-                    zone_name_widget,
-                    zone_list_widget,
-                    queue_mode_widget,
-                ]
-            } else {
-                vec![
-                    zone_list_widget,
-                    queue_mode_widget,
-                ]
+                widgets.push(zone_name_widget);
+            }
+
+            widgets.push(zone_list_widget);
+            widgets.push(queue_mode_widget);
+
+            if settings.profile.is_some() {
+                match settings.queue_mode {
+                    Some(QueueMode::RandomAlbum) | Some(QueueMode::RandomTrack) => {
+                        let queue_actions = vec![
+                            QueueActionEntry::from("Play Now", QueueAction::PlayNow),
+                            QueueActionEntry::from("Add Next", QueueAction::AddNext),
+                            QueueActionEntry::from("Queue", QueueAction::Queue),
+                        ];
+                        let queue_action_widget = Widget::Dropdown(Dropdown {
+                            title: "Queue Action",
+                            subtitle: None,
+                            values: queue_actions,
+                            setting: "queue_action",
+                        });
+
+                        widgets.push(queue_action_widget);
+                    }
+                    _ => (),
+                }
             }
         } else {
-            vec![
-                zone_list_widget,
-            ]
+            widgets.push(zone_list_widget);
         };
 
         Layout {

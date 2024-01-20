@@ -6,7 +6,7 @@ use roon_api::{
 use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 
-use super::{IoEvent, QueueMode, roon_settings::RoonSettings};
+use super::{IoEvent, QueueMode, roon_settings::{RoonSettings, QueueAction}};
 
 const TUI_BROWSE: &str = "tui_browse";
 
@@ -220,12 +220,16 @@ impl RoonBrowse {
         self.browse_paths.insert(zone_id.to_owned(), vec!["", "Profile", "Settings"]);
     }
 
-    pub async fn handle_queue_mode(&mut self, zone_id: &str, queue_mode: &QueueMode, play: bool) {
-        let play_action = if play {"Play Now"} else {"Queue"};
+    pub async fn handle_queue_mode(&mut self, zone_id: &str, queue_mode: &QueueMode, queue_action: QueueAction) {
+        let queue_action = match queue_action {
+            QueueAction::PlayNow => "Play Now",
+            QueueAction::AddNext => "Add Next",
+            QueueAction::Queue => "Queue",
+        };
 
         match queue_mode {
             QueueMode::RandomAlbum => {
-                let browse_path = vec![play_action, "Play Album", "", "Albums", "Library"];
+                let browse_path = vec![queue_action, "Play Album", "", "Albums", "Library"];
                 let opts = BrowseOpts {
                     pop_all: true,
                     multi_session_key: Some(zone_id.to_owned()),
@@ -237,7 +241,7 @@ impl RoonBrowse {
                 self.browse_paths.insert(zone_id.to_owned(), browse_path);
             }
             QueueMode::RandomTrack => {
-                let browse_path = vec![play_action, "", "Tracks", "Library"];
+                let browse_path = vec![queue_action, "", "Tracks", "Library"];
                 let opts = BrowseOpts {
                     pop_all: true,
                     multi_session_key: Some(zone_id.to_owned()),

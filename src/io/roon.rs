@@ -37,7 +37,7 @@ use super::{
     IoEvent,
     QueueMode,
     roon_browse::RoonBrowse,
-    roon_settings::RoonSettings
+    roon_settings::{QueueAction, RoonSettings},
 };
 
 const QUEUE_ITEM_COUNT: u32 = 100;
@@ -194,11 +194,19 @@ impl RoonHandler {
                 let queue_mode = self.settings.get_queue_mode();
                 let auto_radio = matches!(queue_mode, Some(QueueMode::RoonRadio));
 
-                if let Some(end_point) = end_point {
-                    self.select_zone(end_point).await;
+                self.set_roon_radio(auto_radio).await;
+
+                match end_point {
+                    Some((end_point, Some(queue_action))) => {
+                        self.select_zone(end_point).await;
+                        self.handle_queue_mode(queue_action).await;
+                    }
+                    Some((end_point, None)) => {
+                        self.select_zone(end_point).await;
+                    }
+                    None => (),
                 }
 
-                self.set_roon_radio(auto_radio).await;
                 self.settings.save();
                 self.to_app.send(IoEvent::QueueModeCurrent(queue_mode)).await.unwrap();
             }
@@ -275,7 +283,7 @@ impl RoonHandler {
                         .filter(|zone_id| self.zone_map.contains_key(zone_id));
 
                     self.browse.as_mut()?.set_zone_id(active_zone_id);
-                    self.sync_and_save_queue_mode().await;
+                    self.sync_queue_mode().await;
                     self.send_zone_changed(new_zone).await;
                     self.send_zone_list().await;
                 }
@@ -332,7 +340,7 @@ impl RoonHandler {
 
                 for seek in seeks {
                     if seek.queue_time_remaining >= 0 && seek.queue_time_remaining <= 3 {
-                        self.handle_queue_mode(false).await;
+                        self.handle_queue_mode(QueueAction::Queue).await;
                     }
                 };
             }
@@ -384,11 +392,15 @@ impl RoonHandler {
 
                 self.settings.save();
             }
-            IoEvent::QueueModeAppend => {
-                self.handle_queue_mode(false).await;
+            IoEvent::QueueAppend => {
+                self.handle_queue_mode(QueueAction::Queue).await;
+            }
+            IoEvent::QueueNext => {
+                self.handle_queue_mode(QueueAction::AddNext).await;
             }
             IoEvent::ZoneSelected(end_point) => {
                 self.select_zone(end_point).await;
+                self.settings.save();
             }
             IoEvent::ZoneGroupReq => {
                 self.transport.as_ref()?.get_outputs().await;
@@ -433,7 +445,7 @@ impl RoonHandler {
                 if zone.now_playing.is_some() {
                     self.control(&zone_id, &how).await;
                 } else if how == Control::PlayPause {
-                    self.handle_queue_mode(true).await;
+                    self.handle_queue_mode(QueueAction::PlayNow).await;
                 }
             }
             IoEvent::Repeat => {
@@ -604,8 +616,6 @@ impl RoonHandler {
             EndPoint::Zone(zone_id) | EndPoint::MatchedPreset((zone_id, _)) => {
                 transport.subscribe_queue(&zone_id, QUEUE_ITEM_COUNT).await;
 
-                self.browse.as_mut()?.browse_profile(&zone_id).await;
-
                 if let Some(zone) = self.zone_map.get(&zone_id) {
                     let matched_preset = self.matched_zones.get(&zone_id).cloned();
 
@@ -616,7 +626,7 @@ impl RoonHandler {
                 // Store the zone_id in settings before it is used again in sync_and_save_queue_mode
                 self.settings.set_zone_id(Some(zone_id));
 
-                self.sync_and_save_queue_mode().await;
+                self.sync_queue_mode().await;
             }
             EndPoint::Preset(preset) => {
                 let output_ids = self.settings
@@ -634,13 +644,12 @@ impl RoonHandler {
         Some(())
     }
 
-    async fn sync_and_save_queue_mode(&mut self) -> Option<()> {
+    async fn sync_queue_mode(&mut self) -> Option<()> {
         let zone_id = self.settings.get_zone_id()?.to_owned();
         let zone = self.zone_map.get(&zone_id)?;
         let output_id = zone.outputs.first()?.output_id.as_str();
 
         if let Some(queue_mode) = self.settings.remove_queue_mode(output_id) {
-            log::info!("sync_and_save_queue_mode: {} {:?}", zone_id, queue_mode);
             self.settings.set_queue_mode(&zone_id, queue_mode);
         }
 
@@ -657,7 +666,6 @@ impl RoonHandler {
         };
 
         self.settings.set_queue_mode(&zone_id, queue_mode.to_owned());
-        self.settings.save();
         self.to_app.send(IoEvent::QueueModeCurrent(Some(queue_mode))).await.unwrap();
 
         Some(())
@@ -701,18 +709,18 @@ impl RoonHandler {
         Some(())
     }
 
-    async fn handle_queue_mode(&mut self, play: bool) -> Option<()> {
+    async fn handle_queue_mode(&mut self, queue_action: QueueAction) -> Option<()> {
         let zone_id = self.settings.get_zone_id()?;
         let zone = self.zone_map.get(&zone_id)?;
         let queue_mode = self.settings.get_queue_mode()?;
 
-        if play {
+        if queue_action == QueueAction::PlayNow {
             if let Some(now_playing) = zone.now_playing.as_ref() {
                 now_playing.length?;
             }
         }
 
-        self.browse.as_mut()?.handle_queue_mode(&zone_id, &queue_mode, play).await;
+        self.browse.as_mut()?.handle_queue_mode(&zone_id, &queue_mode, queue_action).await;
 
         Some(())
     }
@@ -722,7 +730,6 @@ impl RoonHandler {
         let prim_output_id = zone.outputs.first()?.output_id.as_str();
         let queue_mode = self.settings.remove_queue_mode(&zone_id)?;
 
-        log::info!("{} {:?}", prim_output_id, queue_mode);
         self.settings.set_queue_mode(prim_output_id, queue_mode);
 
         Some(())
