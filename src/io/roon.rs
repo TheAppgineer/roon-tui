@@ -833,10 +833,14 @@ impl RoonHandler {
         let zone = self.zone_map.get(zone_id)?;
         let output_id = zone.outputs.get(0)?.output_id.as_str();
 
-        if let Some(queue_modes) = self.settings.queue_modes.as_mut() {
-            if let Some(queue_mode) = queue_modes.remove(zone_id) {
-                queue_modes.insert(output_id.to_owned(), queue_mode);
-            }
+        if self.settings.queue_modes.is_none() {
+            self.settings.queue_modes = Some(HashMap::new());
+        }
+
+        let queue_modes = self.settings.queue_modes.as_mut()?;
+
+        if let Some(queue_mode) = queue_modes.remove(zone_id) {
+            queue_modes.insert(output_id.to_owned(), queue_mode);
         }
 
         let queue_mode = if zone.settings.auto_radio {
