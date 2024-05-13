@@ -124,15 +124,13 @@ impl ScratchPad {
     fn from(persistent: &Persistent) -> Self {
         let zone_id = persistent.zone_id.to_owned();
         let profile = persistent.profile.to_owned();
-        let queue_mode = if let Some(zone_id) = zone_id.as_deref() {
-            if let Some(queue_modes) = persistent.queue_modes.as_ref() {
-                Some(queue_modes.get(zone_id).cloned().unwrap_or_default())
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let queue_mode = zone_id.as_deref()
+            .and_then(|zone_id| {
+                persistent.queue_modes.as_ref()
+                    .map(|queue_modes| {
+                        queue_modes.get(zone_id).cloned().unwrap_or_default()
+                    })
+            });
 
         ScratchPad {
             zone_id,

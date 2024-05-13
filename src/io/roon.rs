@@ -728,7 +728,7 @@ impl RoonHandler {
     fn backup_queue_mode(&mut self, zone_id: &str) -> Option<()> {
         let zone = self.zone_map.get(zone_id)?;
         let prim_output_id = zone.outputs.first()?.output_id.as_str();
-        let queue_mode = self.settings.remove_queue_mode(&zone_id)?;
+        let queue_mode = self.settings.remove_queue_mode(zone_id)?;
 
         self.settings.set_queue_mode(prim_output_id, queue_mode);
 

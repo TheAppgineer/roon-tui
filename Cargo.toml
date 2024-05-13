@@ -13,7 +13,7 @@ log = "0.4"
 simplelog = "0.12"
 time = "0.3"
 chrono = { version = "0.4", features = ["clock"], default-features = false }
-ratatui = { version = "0.25.0", features = ["crossterm"], default-features = false }
+ratatui = { version = "0.26.0", features = ["crossterm"], default-features = false }
 crossterm = "0.27.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -23,7 +23,7 @@ any_ascii = "0.3.2"
 rand = "0.8.5"
 clap = { version = "4.4.4", features = ["derive"] }
 typetag = "0.2"
-roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", rev = "f1ce520", features = ["browse", "settings", "transport"] }
+roon-api = { git = "https://github.com/TheAppgineer/rust-roon-api.git", rev = "4ea97ae", features = ["browse", "settings", "transport"] }
 
 [profile.release]
 strip = true
